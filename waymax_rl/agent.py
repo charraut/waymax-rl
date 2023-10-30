@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 import jax
 from waymax import datatypes
 from waymax.agents.actor_core import ActorState, Params, WaymaxActorCore, WaymaxActorOutput
@@ -13,7 +11,11 @@ class ActorRL(WaymaxActorCore):
         return super().init(params, rng)
 
     def select_action(
-        self, params: Params, state: datatypes.SimulatorState, actor_state: ActorState, rng: jax.Array
+        self,
+        params: Params,
+        state: datatypes.SimulatorState,
+        actor_state: ActorState,
+        rng: jax.Array,
     ) -> WaymaxActorOutput:
         return super().select_action(params, state, actor_state, rng)
 

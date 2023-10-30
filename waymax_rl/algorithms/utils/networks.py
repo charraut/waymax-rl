@@ -2,12 +2,13 @@
 
 
 import dataclasses
-from typing import Any, Callable, Sequence, Tuple
 import warnings
+from typing import Any, Callable, Sequence, Tuple
 
-from flax import linen
 import jax
 import jax.numpy as jnp
+from flax import linen
+
 
 ActivationFn = Callable[[jnp.ndarray], jnp.ndarray]
 Initializer = Callable[..., Any]
@@ -33,7 +34,7 @@ class MLP(linen.Module):
         hidden = data
         for i, hidden_size in enumerate(self.layer_sizes):
             hidden = linen.Dense(hidden_size, name=f"hidden_{i}", kernel_init=self.kernel_init, use_bias=self.bias)(
-                hidden
+                hidden,
             )
             if i != len(self.layer_sizes) - 1 or self.activate_final:
                 hidden = self.activation(hidden)
@@ -61,7 +62,9 @@ def make_policy_network(
 
 
 def make_value_network(
-    obs_size: int, hidden_layer_sizes: Sequence[int] = (256, 256), activation: ActivationFn = linen.relu
+    obs_size: int,
+    hidden_layer_sizes: Sequence[int] = (256, 256),
+    activation: ActivationFn = linen.relu,
 ) -> FeedForwardNetwork:
     """Creates a policy network."""
     value_module = MLP(

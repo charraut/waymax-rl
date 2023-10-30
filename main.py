@@ -1,10 +1,10 @@
-from waymax import dataloader, dynamics, config, env
-from waymax.datatypes.observation import observation_from_state
-from waymax.env.wrappers.brax_wrapper import BraxWrapper
 import dataclasses
 
 import jax
 import jax.numpy as jnp
+from waymax import config, dataloader, dynamics, env
+from waymax.datatypes.observation import observation_from_state
+from waymax.env.wrappers.brax_wrapper import BraxWrapper
 
 
 def custom_obs(state):
@@ -23,7 +23,7 @@ if __name__ == "__main__":
     env_config = config.EnvironmentConfig(max_num_objects=max_num_objects)
 
     scenarios = dataloader.simulator_state_generator(
-        dataclasses.replace(config.WOD_1_1_0_TRAINING, max_num_objects=max_num_objects)
+        dataclasses.replace(config.WOD_1_1_0_TRAINING, max_num_objects=max_num_objects),
     )
 
     waymax_env = env.PlanningAgentEnvironment(dynamics_model, env_config)
