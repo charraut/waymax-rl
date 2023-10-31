@@ -2,7 +2,8 @@
 
 import abc
 import math
-from typing import Generic, Optional, Sequence, Tuple, TypeVar
+from collections.abc import Sequence
+from typing import Generic, TypeVar
 
 import flax
 import jax
@@ -29,7 +30,7 @@ class ReplayBuffer(abc.ABC, Generic[State, Sample]):
         self.check_can_insert(buffer_state, samples, 1)
         return self.insert_internal(buffer_state, samples)
 
-    def sample(self, buffer_state: State) -> Tuple[State, Sample]:
+    def sample(self, buffer_state: State) -> tuple[State, Sample]:
         """Sample a batch of data."""
         self.check_can_sample(buffer_state, 1)
         return self.sample_internal(buffer_state)
@@ -49,7 +50,7 @@ class ReplayBuffer(abc.ABC, Generic[State, Sample]):
         """Insert data into the replay buffer."""
 
     @abc.abstractmethod
-    def sample_internal(self, buffer_state: State) -> Tuple[State, Sample]:
+    def sample_internal(self, buffer_state: State) -> tuple[State, Sample]:
         """Sample a batch of data."""
 
 
@@ -147,7 +148,7 @@ class QueueBase(ReplayBuffer[ReplayBufferState, Sample], Generic[Sample]):
             sample_position=sample_position,
         )
 
-    def sample_internal(self, buffer_state: ReplayBufferState) -> Tuple[ReplayBufferState, Sample]:
+    def sample_internal(self, buffer_state: ReplayBufferState) -> tuple[ReplayBufferState, Sample]:
         raise NotImplementedError(f"{self.__class__}.sample() is not implemented.")
 
     def size(self, buffer_state: ReplayBufferState) -> int:
@@ -192,7 +193,7 @@ class Queue(QueueBase[Sample], Generic[Sample]):
         if not self._cyclic:
             self._size -= self._sample_batch_size
 
-    def sample_internal(self, buffer_state: ReplayBufferState) -> Tuple[ReplayBufferState, Sample]:
+    def sample_internal(self, buffer_state: ReplayBufferState) -> tuple[ReplayBufferState, Sample]:
         """Sample a batch of data.
 
         Args:
@@ -207,7 +208,6 @@ class Queue(QueueBase[Sample], Generic[Sample]):
                 f"not match the shape of the buffer state ({buffer_state.data.shape})",
             )
 
-        # Note that this may be out of bound, but the operations below would still work fine as they take this number modulo the buffer size
         idx = (jnp.arange(self._sample_batch_size) + buffer_state.sample_position) % buffer_state.insert_position
 
         flat_batch = jnp.take(buffer_state.data, idx, axis=0, mode="wrap")
@@ -237,7 +237,7 @@ class UniformSamplingQueue(QueueBase[Sample], Generic[Sample]):
       `sample_batch_size`
     """
 
-    def sample_internal(self, buffer_state: ReplayBufferState) -> Tuple[ReplayBufferState, Sample]:
+    def sample_internal(self, buffer_state: ReplayBufferState) -> tuple[ReplayBufferState, Sample]:
         if buffer_state.data.shape != self._data_shape:
             raise ValueError(
                 f"Data shape expected by the replay buffer ({self._data_shape}) does "
@@ -271,7 +271,7 @@ class PmapWrapper(ReplayBuffer[State, Sample]):
     def __init__(
         self,
         buffer: ReplayBuffer[State, Sample],
-        local_device_count: Optional[int] = None,
+        local_device_count: int | None = None,
     ):
         self._buffer = buffer
         self._num_devices = local_device_count or jax.local_device_count()
@@ -290,7 +290,7 @@ class PmapWrapper(ReplayBuffer[State, Sample]):
         return jax.pmap(self._buffer.insert_internal)(buffer_state, samples)
 
     # NB: In multi-hosts setups, every host will get a different batch
-    def sample(self, buffer_state: State) -> Tuple[State, Sample]:
+    def sample(self, buffer_state: State) -> tuple[State, Sample]:
         self._buffer.check_can_sample(buffer_state, self._num_devices)
         buffer_state, samples = jax.pmap(self._buffer.sample_internal)(buffer_state)
         samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
@@ -301,7 +301,7 @@ class PmapWrapper(ReplayBuffer[State, Sample]):
         """Insert data into the replay buffer."""
         raise ValueError("This function should not be called.")
 
-    def sample_internal(self, buffer_state: State) -> Tuple[State, Sample]:
+    def sample_internal(self, buffer_state: State) -> tuple[State, Sample]:
         """Sample a batch of data."""
         raise ValueError("This function should not be called.")
 
@@ -357,7 +357,7 @@ class PjitWrapper(ReplayBuffer[State, Sample]):
             samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
             return jax.vmap(self._buffer.insert_internal)(buffer_state, samples)
 
-        def sample(buffer_state: State) -> Tuple[State, Sample]:
+        def sample(buffer_state: State) -> tuple[State, Sample]:
             buffer_state, samples = jax.vmap(self._buffer.sample_internal)(buffer_state)
             samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
             samples = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1,) + x.shape[2:]), samples)
@@ -392,7 +392,7 @@ class PjitWrapper(ReplayBuffer[State, Sample]):
         with self._mesh:
             return self._partitioned_insert(buffer_state, samples)
 
-    def sample(self, buffer_state: State) -> Tuple[State, Sample]:
+    def sample(self, buffer_state: State) -> tuple[State, Sample]:
         """See base class."""
         self._buffer.check_can_sample(buffer_state, self._num_devices)
         with self._mesh:
@@ -407,7 +407,7 @@ class PjitWrapper(ReplayBuffer[State, Sample]):
         """Insert data into the replay buffer."""
         raise ValueError("This function should not be called.")
 
-    def sample_internal(self, buffer_state: State) -> Tuple[State, Sample]:
+    def sample_internal(self, buffer_state: State) -> tuple[State, Sample]:
         """Sample a batch of data."""
         raise ValueError("This function should not be called.")
 
@@ -416,4 +416,4 @@ class PjitWrapper(ReplayBuffer[State, Sample]):
 class PrimitiveReplayBufferState(Generic[Sample]):
     """The state of the primitive replay buffer."""
 
-    samples: Optional[Sample] = None
+    samples: Sample | None = None

@@ -3,7 +3,8 @@
 
 import dataclasses
 import warnings
-from typing import Any, Callable, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -142,7 +143,7 @@ def make_model(
     return model
 
 
-def make_models(policy_params_size: int, obs_size: int) -> Tuple[FeedForwardNetwork, FeedForwardNetwork]:
+def make_models(policy_params_size: int, obs_size: int) -> tuple[FeedForwardNetwork, FeedForwardNetwork]:
     """Creates models for policy and value functions.
 
     Args:

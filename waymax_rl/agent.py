@@ -3,7 +3,7 @@ from waymax import datatypes
 from waymax.agents.actor_core import ActorState, Params, WaymaxActorCore, WaymaxActorOutput
 
 
-class ActorRL(WaymaxActorCore):
+class Agent(WaymaxActorCore):
     def __init__(self, env, config, model, optimizer, logger, rng):
         super().__init__(env, config, model, optimizer, logger, rng)
 

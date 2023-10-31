@@ -2,7 +2,6 @@
 line-length = 120
 
 [tool.ruff]
-ignore = ["B008"]
 line-length = 120
 select = [
   "F",  # Pyflakes
@@ -34,7 +33,7 @@ select = [
 ]
 show-fixes = true
 show-source = true
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.isort]
 lines-after-imports = 2
