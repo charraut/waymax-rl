@@ -1,5 +1,6 @@
 # Code source: https://github.com/google/brax/blob/main/brax/training/replay_buffers.py
 
+
 import abc
 import math
 from collections.abc import Sequence
@@ -11,7 +12,7 @@ import jax.numpy as jnp
 from jax import flatten_util
 from jax.experimental import pjit
 
-from waymax_rl.utils.types import PRNGKey
+from waymax_rl.utils.utils import PRNGKey
 
 
 State = TypeVar("State")
@@ -131,7 +132,6 @@ class QueueBase(ReplayBuffer[ReplayBufferState, Sample], Generic[Sample]):
         update = self._flatten_fn(samples)
         data = buffer_state.data
 
-        # If needed, roll the buffer to make sure there's enough space to fit `update` after the current position
         position = buffer_state.insert_position
         roll = jnp.minimum(0, len(data) - position - len(update))
         data = jax.lax.cond(roll, lambda: jnp.roll(data, roll, axis=0), lambda: data)

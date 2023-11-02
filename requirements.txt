@@ -1,0 +1,6 @@
+git+https://github.com/waymo-research/waymax.git@main#egg=waymo-waymax
+-f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+jax[cuda12_pip]
+tensorboardX
+black
+ruff
