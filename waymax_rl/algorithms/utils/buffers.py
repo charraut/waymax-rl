@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from jax import flatten_util
 from jax.experimental import pjit
 
-from waymax_rl.utils.utils import PRNGKey
+from waymax_rl.utils import PRNGKey
 
 
 State = TypeVar("State")

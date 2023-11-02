@@ -19,10 +19,8 @@ from waymax_rl.algorithms.utils.networks import (
 )
 from waymax_rl.env.env import WaymaxBicycleEnv
 from waymax_rl.env.observations import custom_obs
-from waymax_rl.utils.logs import RunningStatisticsState, init_state, update
-from waymax_rl.utils.utils import (
+from waymax_rl.utils import (
     PMAP_AXIS_NAME,
-    Array,
     Metrics,
     TrainingState,
     Transition,
@@ -68,7 +66,7 @@ def parse_args():
     parser.add_argument("--discount_factor", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)  # If ent coef fixed - NOT USED
+    parser.add_argument("--alpha", type=float, default=0.2)
     # Network
     parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256))
     parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256))
@@ -80,7 +78,6 @@ def parse_args():
     parser.add_argument("--action_repeat", type=int, default=1)
     parser.add_argument("--reward_scaling", type=int, default=1)
     parser.add_argument("--normalize_observations", type=bool, default=True)
-    parser.add_argument("--saved_model_freq", type=int, default=4)  # - NOT USED
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max_devices_per_host", type=int, default=1)
 
@@ -92,24 +89,18 @@ def parse_args():
 # TO REMOVE OTHER PLACE
 def init_training_state(
     key: PRNGKey,
-    obs_size: int,
     local_devices_to_use: int,
     sac_network: SACNetworks,
-    alpha_optimizer: optax.GradientTransformation,
     policy_optimizer: optax.GradientTransformation,
     q_optimizer: optax.GradientTransformation,
 ) -> TrainingState:
     """Inits the training state and replicates it over devices."""
     key_policy, key_q = jax.random.split(key)
-    log_alpha = jnp.asarray(0.0, dtype=jnp.float32)
-    alpha_optimizer_state = alpha_optimizer.init(log_alpha)
 
     policy_params = sac_network.policy_network.init(key_policy)
     policy_optimizer_state = policy_optimizer.init(policy_params)
     q_params = sac_network.q_network.init(key_q)
     q_optimizer_state = q_optimizer.init(q_params)
-
-    normalizer_params = init_state(Array((obs_size,), jnp.dtype("float32")))
 
     training_state = TrainingState(
         policy_optimizer_state=policy_optimizer_state,
@@ -119,9 +110,6 @@ def init_training_state(
         target_q_params=q_params,
         gradient_steps=jnp.zeros(()),
         env_steps=jnp.zeros(()),
-        alpha_optimizer_state=alpha_optimizer_state,
-        alpha_params=log_alpha,
-        normalizer_params=normalizer_params,
     )
 
     return jax.device_put_replicated(training_state, jax.local_devices()[:local_devices_to_use])
@@ -172,7 +160,6 @@ def train(
     make_policy = make_inference_fn(sac_network)
 
     # Optimizers
-    alpha_optimizer = optax.adam(learning_rate=3e-4)
     policy_optimizer = optax.adam(learning_rate=args.learning_rate)
     q_optimizer = optax.adam(learning_rate=args.learning_rate)
 
@@ -193,18 +180,17 @@ def train(
         sample_batch_size=args.batch_size * args.grad_updates_per_step // device_count,
     )
 
-    # Create losses and grad functions for SAC losses / Ent coef losses - could be fixed alpha
-    alpha_loss, critic_loss, actor_loss = make_losses(
+    # Create losses and grad functions for SAC losses
+    alpha = args.alpha
+    critic_loss, actor_loss = make_losses(
         sac_network=sac_network,
         reward_scaling=args.reward_scaling,
         discount_factor=args.discount_factor,
-        action_size=action_size,
     )
 
-    # Update gradients for all losses
-    alpha_update = gradient_update_fn(
-        alpha_loss,
-        alpha_optimizer,
+    actor_update = gradient_update_fn(
+        actor_loss,
+        policy_optimizer,
         pmap_axis_name=PMAP_AXIS_NAME,
     )
     critic_update = gradient_update_fn(
@@ -212,34 +198,19 @@ def train(
         q_optimizer,
         pmap_axis_name=PMAP_AXIS_NAME,
     )
-    actor_update = gradient_update_fn(
-        actor_loss,
-        policy_optimizer,
-        pmap_axis_name=PMAP_AXIS_NAME,
-    )
 
-    # One step of stochastic gradient descend for all params (alpha, policy params, q params)
+    # One step of stochastic gradient descend for all params (policy params, q params)
     def sgd_step(
         carry: tuple[TrainingState, PRNGKey],
         transitions: Transition,
     ) -> tuple[tuple[TrainingState, PRNGKey], Metrics]:
         training_state, key = carry
 
-        key, key_alpha, key_critic, key_actor = jax.random.split(key, 4)
+        key, key_critic, key_actor = jax.random.split(key, 3)
 
-        alpha_loss, alpha_params, alpha_optimizer_state = alpha_update(
-            training_state.alpha_params,
-            training_state.policy_params,
-            training_state.normalizer_params,
-            transitions,
-            key_alpha,
-            optimizer_state=training_state.alpha_optimizer_state,
-        )
-        alpha = jnp.exp(training_state.alpha_params)
         critic_loss, q_params, q_optimizer_state = critic_update(
             training_state.q_params,
             training_state.policy_params,
-            training_state.normalizer_params,
             training_state.target_q_params,
             alpha,
             transitions,
@@ -248,7 +219,6 @@ def train(
         )
         actor_loss, policy_params, policy_optimizer_state = actor_update(
             training_state.policy_params,
-            training_state.normalizer_params,
             training_state.q_params,
             alpha,
             transitions,
@@ -265,8 +235,6 @@ def train(
         metrics = {
             "critic_loss": critic_loss,
             "actor_loss": actor_loss,
-            "alpha_loss": alpha_loss,
-            "alpha": jnp.exp(alpha_params),
         }
 
         new_training_state = TrainingState(
@@ -277,34 +245,23 @@ def train(
             target_q_params=new_target_q_params,
             gradient_steps=training_state.gradient_steps + 1,
             env_steps=training_state.env_steps,
-            alpha_optimizer_state=alpha_optimizer_state,
-            alpha_params=alpha_params,
-            normalizer_params=training_state.normalizer_params,
         )
 
         return (new_training_state, key), metrics
 
     # Collect rollout equivalent
     def get_experience(
-        normalizer_params: RunningStatisticsState,
         policy_params: Params,
         env_state,
         buffer_state: ReplayBufferState,
         key: PRNGKey,
     ):
-        policy = make_policy((normalizer_params, policy_params))
+        policy = make_policy(policy_params)
         env_state, transitions = actor_step(env, env_state, policy, key)
-
-        # Updates the running statistics with the given batch of data
-        normalizer_params = update(
-            normalizer_params,
-            transitions.observation,
-            pmap_axis_name=PMAP_AXIS_NAME,
-        )
 
         buffer_state = replay_buffer.insert(buffer_state, transitions)
 
-        return normalizer_params, env_state, buffer_state
+        return env_state, buffer_state
 
     # Training step --> One step collection (s,a,r,s') + one Sgd step
     def training_step(
@@ -314,15 +271,13 @@ def train(
         key: PRNGKey,
     ):
         experience_key, training_key = jax.random.split(key)
-        normalizer_params, env_state, buffer_state = get_experience(
-            training_state.normalizer_params,
+        env_state, buffer_state = get_experience(
             training_state.policy_params,
             env_state,
             buffer_state,
             experience_key,
         )
         training_state = training_state.replace(
-            normalizer_params=normalizer_params,
             env_steps=training_state.env_steps + env_steps_per_actor_step,
         )
 
@@ -349,8 +304,7 @@ def train(
             del unused
             training_state, env_state, buffer_state, key = carry
             key, new_key = jax.random.split(key)
-            new_normalizer_params, env_state, buffer_state = get_experience(
-                training_state.normalizer_params,
+            env_state, buffer_state = get_experience(
                 training_state.policy_params,
                 env_state,
                 buffer_state,
@@ -358,7 +312,6 @@ def train(
             )
 
             new_training_state = training_state.replace(
-                normalizer_params=new_normalizer_params,
                 env_steps=training_state.env_steps + env_steps_per_actor_step,
             )
 
@@ -426,10 +379,8 @@ def train(
     # Training state init
     training_state = init_training_state(
         key=global_key,
-        obs_size=obs_size,
         local_devices_to_use=local_devices_to_use,
         sac_network=sac_network,
-        alpha_optimizer=alpha_optimizer,
         policy_optimizer=policy_optimizer,
         q_optimizer=q_optimizer,
     )
@@ -481,7 +432,7 @@ def train(
         if process_id == 0:
             if checkpoint_logdir:
                 # Save current policy
-                params = unpmap((training_state.normalizer_params, training_state.policy_params))
+                params = training_state.policy_params
                 path = f"{checkpoint_logdir}/model_{current_step}.pkl"
                 save_params(path, params)
 
@@ -494,7 +445,7 @@ def train(
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
 
-    params = unpmap((training_state.normalizer_params, training_state.policy_params))
+    params = training_state.policy_params
 
     # If there was no mistakes the training_state should still be identical on all devices
     assert_is_replicated(training_state)

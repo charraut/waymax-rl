@@ -1,7 +1,6 @@
-import dataclasses
 import functools
 import pickle
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import Any, NamedTuple, TypeVar
 
 import flax
@@ -9,34 +8,15 @@ import jax
 import jax.numpy as jnp
 import optax
 from etils import epath
-from flax import struct
 
 
 Params = Any
 PRNGKey = jnp.ndarray
 Metrics = Mapping[str, jnp.ndarray]
-
-PreprocessorParams = Any
-PolicyParams = tuple[PreprocessorParams, Params]
+PolicyParams = Params
 NetworkType = TypeVar("NetworkType")
-
-
-@dataclasses.dataclass(frozen=True)
-class Array:
-    """Describes a numpy array or scalar shape and dtype.
-
-    Similar to dm_env.specs.Array.
-    """
-
-    shape: tuple[int, ...]
-    dtype: jnp.dtype
-
-
-NestedArray = jnp.ndarray
-NestedTensor = Any
-NestedSpec = Array | Iterable["NestedSpec"] | Mapping[Any, "NestedSpec"]
-
-Nest = NestedArray | NestedTensor | NestedSpec
+ReplayBufferState = Any
+PMAP_AXIS_NAME = "i"
 
 
 class Transition(NamedTuple):
@@ -50,27 +30,6 @@ class Transition(NamedTuple):
     extras: jnp.ndarray = ()
 
 
-@struct.dataclass
-class NestedMeanStd:
-    """A container for running statistics (mean, std) of possibly nested data."""
-
-    mean: Nest
-    std: Nest
-
-
-@struct.dataclass
-class RunningStatisticsState(NestedMeanStd):
-    """Full state of running statistics computation."""
-
-    count: jnp.ndarray
-    summed_variance: Nest
-
-
-InferenceParams = tuple[NestedMeanStd, Params]
-ReplayBufferState = Any
-PMAP_AXIS_NAME = "i"
-
-
 @flax.struct.dataclass
 class TrainingState:
     """Contains training state for the learner."""
@@ -82,9 +41,6 @@ class TrainingState:
     target_q_params: Params
     gradient_steps: jnp.ndarray
     env_steps: jnp.ndarray
-    alpha_optimizer_state: optax.OptState
-    alpha_params: Params
-    normalizer_params: RunningStatisticsState
 
 
 def load_params(path: str) -> Any:
