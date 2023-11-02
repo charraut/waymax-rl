@@ -123,6 +123,7 @@ def init_training_state(
         alpha_params=log_alpha,
         normalizer_params=normalizer_params,
     )
+
     return jax.device_put_replicated(training_state, jax.local_devices()[:local_devices_to_use])
 
 
@@ -132,7 +133,6 @@ def train(
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     checkpoint_logdir: str | None = None,
 ):
-    """SAC training."""
     start_train_func = perf_counter()
 
     # Print parameters
@@ -281,6 +281,7 @@ def train(
             alpha_params=alpha_params,
             normalizer_params=training_state.normalizer_params,
         )
+
         return (new_training_state, key), metrics
 
     # Collect rollout equivalent
@@ -295,7 +296,6 @@ def train(
         env_state, transitions = actor_step(env, env_state, policy, key)
 
         # Updates the running statistics with the given batch of data
-
         normalizer_params = update(
             normalizer_params,
             transitions.observation,
@@ -303,6 +303,7 @@ def train(
         )
 
         buffer_state = replay_buffer.insert(buffer_state, transitions)
+
         return normalizer_params, env_state, buffer_state
 
     # Training step --> One step collection (s,a,r,s') + one Sgd step
@@ -335,6 +336,7 @@ def train(
         (training_state, _), metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
 
         metrics["buffer_current_size"] = replay_buffer.size(buffer_state)
+
         return training_state, env_state, buffer_state, metrics
 
     def prefill_replay_buffer(
@@ -354,10 +356,12 @@ def train(
                 buffer_state,
                 key,
             )
+
             new_training_state = training_state.replace(
                 normalizer_params=new_normalizer_params,
                 env_steps=training_state.env_steps + env_steps_per_actor_step,
             )
+
             return (new_training_state, env_state, buffer_state, new_key), ()
 
         return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
@@ -372,6 +376,7 @@ def train(
             ts, es, bs, k = carry
             k, new_key = jax.random.split(k)
             ts, es, bs, metrics = training_step(ts, es, bs, k)
+
             return (ts, es, bs, new_key), metrics
 
         (training_state, env_state, buffer_state, key), metrics = jax.lax.scan(
@@ -380,7 +385,9 @@ def train(
             (),
             length=num_training_steps_per_epoch,
         )
+
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
+
         return training_state, env_state, buffer_state, metrics
 
     # Note that this is NOT a pure jittable method --> Main training epoch function (in the loop)
@@ -391,6 +398,7 @@ def train(
         key: PRNGKey,
     ):
         nonlocal training_walltime
+
         t = perf_counter()
         (training_state, env_state, buffer_state, metrics) = training_epoch(
             training_state,
@@ -409,6 +417,7 @@ def train(
             "training/walltime": training_walltime,
             **{f"training/{name}": value for name, value in metrics.items()},
         }
+
         return training_state, env_state, buffer_state, metrics
 
     global_key, local_key = jax.random.split(rng)
@@ -426,7 +435,7 @@ def train(
     )
     del global_key
 
-    local_key, rb_key, env_key, eval_key = jax.random.split(local_key, 4)
+    local_key, rb_key = jax.random.split(local_key, 2)
 
     # Function compilation
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name=PMAP_AXIS_NAME)
@@ -490,6 +499,7 @@ def train(
     # If there was no mistakes the training_state should still be identical on all devices
     assert_is_replicated(training_state)
     synchronize_hosts()
+
     return (make_policy, params, metrics)
 
 

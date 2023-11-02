@@ -105,12 +105,14 @@ class QueueBase(ReplayBuffer[ReplayBufferState, Sample], Generic[Sample]):
         """Checks whether insert operation can be performed."""
         assert isinstance(shards, int), "This method should not be JITed."
         insert_size = jax.tree_util.tree_flatten(samples)[0][0].shape[0] // shards
+
         if self._data_shape[0] < insert_size:
             raise ValueError(
                 "Trying to insert a batch of samples larger than the maximum replay"
                 f" size. num_samples: {insert_size}, max replay size"
                 f" {self._data_shape[0]}",
             )
+
         self._size = min(self._data_shape[0], self._size + insert_size)
 
     def insert_internal(self, buffer_state: ReplayBufferState, samples: Sample) -> ReplayBufferState:
@@ -185,11 +187,13 @@ class Queue(QueueBase[Sample], Generic[Sample]):
     def check_can_sample(self, buffer_state, shards):
         """Checks whether sampling can be performed. Do not JIT this method."""
         assert isinstance(shards, int), "This method should not be JITed."
+
         if self._size < self._sample_batch_size:
             raise ValueError(
                 f"Trying to sample {self._sample_batch_size * shards} elements, but"
                 f" only {self._size * shards} available.",
             )
+
         if not self._cyclic:
             self._size -= self._sample_batch_size
 
@@ -218,6 +222,7 @@ class Queue(QueueBase[Sample], Generic[Sample]):
             sample_position = sample_position % buffer_state.insert_position
 
         new_state = buffer_state.replace(sample_position=sample_position)
+
         return new_state, self._unflatten_fn(flat_batch)
 
     def size(self, buffer_state: ReplayBufferState) -> int:
@@ -252,6 +257,7 @@ class UniformSamplingQueue(QueueBase[Sample], Generic[Sample]):
             maxval=buffer_state.insert_position,
         )
         batch = jnp.take(buffer_state.data, idx, axis=0, mode="wrap")
+
         return buffer_state.replace(key=key), self._unflatten_fn(batch)
 
 
@@ -279,22 +285,27 @@ class PmapWrapper(ReplayBuffer[State, Sample]):
     def init(self, key: PRNGKey) -> State:
         key = jax.random.fold_in(key, jax.process_index())
         keys = jax.random.split(key, self._num_devices)
+
         return jax.pmap(self._buffer.init)(keys)
 
     # NB: In multi-hosts setups, every host is expected to give a different batch
     def insert(self, buffer_state: State, samples: Sample) -> State:
         self._buffer.check_can_insert(buffer_state, samples, self._num_devices)
         samples = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1, self._num_devices) + x.shape[1:]), samples)
+
         # This is to enforce we're gonna iterate on the start of the batch before the end of the batch
         samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
+
         return jax.pmap(self._buffer.insert_internal)(buffer_state, samples)
 
     # NB: In multi-hosts setups, every host will get a different batch
     def sample(self, buffer_state: State) -> tuple[State, Sample]:
         self._buffer.check_can_sample(buffer_state, self._num_devices)
         buffer_state, samples = jax.pmap(self._buffer.sample_internal)(buffer_state)
+
         samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
         samples = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1,) + x.shape[2:]), samples)
+
         return buffer_state, samples
 
     def insert_internal(self, buffer_state: State, samples: Sample) -> State:
@@ -346,6 +357,7 @@ class PjitWrapper(ReplayBuffer[State, Sample]):
 
         def init(key: PRNGKey) -> State:
             keys = jax.random.split(key, self._num_devices)
+
             return jax.vmap(self._buffer.init)(keys)
 
         def insert(buffer_state: State, samples: Sample) -> State:
@@ -355,12 +367,14 @@ class PjitWrapper(ReplayBuffer[State, Sample]):
             )
             # This is to enforce we're gonna iterate on the start of the batch before the end of the batch
             samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
+
             return jax.vmap(self._buffer.insert_internal)(buffer_state, samples)
 
         def sample(buffer_state: State) -> tuple[State, Sample]:
             buffer_state, samples = jax.vmap(self._buffer.sample_internal)(buffer_state)
             samples = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), samples)
             samples = jax.tree_util.tree_map(lambda x: jnp.reshape(x, (-1,) + x.shape[2:]), samples)
+
             return buffer_state, samples
 
         def size(buffer_state: State) -> int:

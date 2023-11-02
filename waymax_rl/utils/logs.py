@@ -111,12 +111,15 @@ def update(
     # batch and state have different order of elements.
     assert jax.tree_util.tree_structure(batch) == jax.tree_util.tree_structure(state.mean)
     batch_shape = jax.tree_util.tree_leaves(batch)[0].shape
+
     # We assume the batch dimensions always go first.
     batch_dims = batch_shape[: len(batch_shape) - jax.tree_util.tree_leaves(state.mean)[0].ndim]
     batch_axis = range(len(batch_dims))
     step_increment = jnp.prod(jnp.array(batch_dims)) if weights is None else jnp.sum(weights)
+
     if pmap_axis_name is not None:
         step_increment = jax.lax.psum(step_increment, axis_name=pmap_axis_name)
+
     count = state.count + step_increment
 
     # Validation is important. If the shapes don't match exactly, but are
@@ -125,6 +128,7 @@ def update(
     if validate_shapes:
         if weights is not None and weights.shape != batch_dims:
             raise ValueError(f"{weights.shape} != {batch_dims}")
+
         _validate_batch_shapes(batch, state.mean, batch_dims)
 
     def _compute_node_statistics(
@@ -134,36 +138,47 @@ def update(
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         assert isinstance(mean, jnp.ndarray), type(mean)
         assert isinstance(summed_variance, jnp.ndarray), type(summed_variance)
+
         # The mean and the sum of past variances are updated with Welford's
         # algorithm using batches (see https://stackoverflow.com/q/56402955).
         diff_to_old_mean = batch - mean
+
         if weights is not None:
             expanded_weights = jnp.reshape(weights, list(weights.shape) + [1] * (batch.ndim - weights.ndim))
             diff_to_old_mean = diff_to_old_mean * expanded_weights
+
         mean_update = jnp.sum(diff_to_old_mean, axis=batch_axis) / count
+
         if pmap_axis_name is not None:
             mean_update = jax.lax.psum(mean_update, axis_name=pmap_axis_name)
+
         mean = mean + mean_update
 
         diff_to_new_mean = batch - mean
         variance_update = diff_to_old_mean * diff_to_new_mean
         variance_update = jnp.sum(variance_update, axis=batch_axis)
+
         if pmap_axis_name is not None:
             variance_update = jax.lax.psum(variance_update, axis_name=pmap_axis_name)
+
         summed_variance = summed_variance + variance_update
+
         return mean, summed_variance
 
     updated_stats = jax.tree_util.tree_map(_compute_node_statistics, state.mean, state.summed_variance, batch)
+
     # Extract `mean` and `summed_variance` from `updated_stats` nest.
     mean = jax.tree_util.tree_map(lambda _, x: x[0], state.mean, updated_stats)
     summed_variance = jax.tree_util.tree_map(lambda _, x: x[1], state.mean, updated_stats)
 
     def compute_std(summed_variance: jnp.ndarray, std: jnp.ndarray) -> jnp.ndarray:
         assert isinstance(summed_variance, jnp.ndarray)
+
         # Summed variance can get negative due to rounding errors.
         summed_variance = jnp.maximum(summed_variance, 0)
         std = jnp.sqrt(summed_variance / count)
         std = jnp.clip(std, std_min_value, std_max_value)
+
         return std
 
     std = jax.tree_util.tree_map(compute_std, summed_variance, state.std)
@@ -182,10 +197,13 @@ def normalize(
         # Only normalize inexact
         if not jnp.issubdtype(data.dtype, jnp.inexact):
             return data
+
         data = (data - mean) / std
+
         if max_abs_value is not None:
             # TODO: remove pylint directive
             data = jnp.clip(data, -max_abs_value, +max_abs_value)
+
         return data
 
     return jax.tree_util.tree_map(normalize_leaf, batch, mean_std.mean, mean_std.std)
@@ -210,6 +228,7 @@ def denormalize(batch, mean_std: NestedMeanStd):
         # Only denormalize inexact
         if not jnp.issubdtype(data.dtype, jnp.inexact):
             return data
+
         return data * std + mean
 
     return jax.tree_util.tree_map(denormalize_leaf, batch, mean_std.mean, mean_std.std)

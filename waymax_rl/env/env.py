@@ -70,7 +70,11 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
 
 class WaymaxBicycleEnv(WaymaxBaseEnv):
     def __init__(
-        self, max_num_objects: int, num_envs: int, observation_fn: callable = None, reward_fn: callable = None
+        self,
+        max_num_objects: int,
+        num_envs: int,
+        observation_fn: callable = None,
+        reward_fn: callable = None,
     ) -> None:
         dynamics_model = dynamics.InvertibleBicycleModel(normalize_actions=True)
         env_config = config.EnvironmentConfig(max_num_objects=max_num_objects)

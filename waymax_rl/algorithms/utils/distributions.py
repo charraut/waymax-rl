@@ -63,8 +63,10 @@ class ParametricDistribution(abc.ABC):
         dist = self.create_dist(parameters)
         log_probs = dist.log_prob(actions)
         log_probs -= self._postprocessor.forward_log_det_jacobian(actions)
+
         if self._event_ndims == 1:
             log_probs = jnp.sum(log_probs, axis=-1)  # sum over action dimension
+
         return log_probs
 
     def entropy(self, parameters, seed):
@@ -72,8 +74,10 @@ class ParametricDistribution(abc.ABC):
         dist = self.create_dist(parameters)
         entropy = dist.entropy()
         entropy += self._postprocessor.forward_log_det_jacobian(dist.sample(seed=seed))
+
         if self._event_ndims == 1:
             entropy = jnp.sum(entropy, axis=-1)
+
         return entropy
 
 
@@ -93,11 +97,13 @@ class NormalDistribution:
     def log_prob(self, x):
         log_unnormalized = -0.5 * jnp.square(x / self.scale - self.loc / self.scale)
         log_normalization = 0.5 * jnp.log(2.0 * jnp.pi) + jnp.log(self.scale)
+
         return log_unnormalized - log_normalization
 
     def entropy(self):
         log_normalization = 0.5 * jnp.log(2.0 * jnp.pi) + jnp.log(self.scale)
         entropy = 0.5 + log_normalization
+
         return entropy * jnp.ones_like(self.loc)
 
 
@@ -137,4 +143,5 @@ class NormalTanhDistribution(ParametricDistribution):
     def create_dist(self, parameters):
         loc, scale = jnp.split(parameters, 2, axis=-1)
         scale = jax.nn.softplus(scale) + self._min_std
+
         return NormalDistribution(loc=loc, scale=scale)
