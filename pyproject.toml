@@ -9,26 +9,26 @@ select = [
   "W",  # pycodestyle warnings
   #"C90",  # mccabe
   "I",  # isort
-  #"N",  # pep8-naming
+  "N",  # pep8-naming
   "UP",  # pyupgrade
-  #"YTT",  # flake8-2020
+  "YTT",  # flake8-2020
   #"S",  # flake8-bandit
-  #"B",  # flake8-bugbear
-  #"A",  # flake8-builtins
+  "B",  # flake8-bugbear
+  "A",  # flake8-builtins
   "COM",  # flake8-commas
   "C40",  # flake8-comprehensions
-  #"ISC",  # flake8-implicit-str-concat
-  #"ICN",  # flake8-import-conventions
-  #"G",  # flake8-logging-format
-  #"PIE",  # flake8-pie
-  #"PYI",  # flake8-pyi
-  #"SLF",  # flake8-self
+  "ISC",  # flake8-implicit-str-concat
+  "ICN",  # flake8-import-conventions
+  "G",  # flake8-logging-format
+  "PIE",  # flake8-pie
+  "PYI",  # flake8-pyi
+  "SLF",  # flake8-self
   "SIM",  # flake8-simplify
-  #"TID",  # flake8-tidy-imports
+  "TID",  # flake8-tidy-imports
   #"TCH",  # flake8-type-checking
   #"ARG",  # flake8-unused-arguments
-  #"ERA",  # eradicate
-  #"NPY",  # numpy
+  "ERA",  # eradicate
+  "NPY",  # numpy
   #"RUF"  # ruff
 ]
 show-fixes = true

@@ -1,7 +1,7 @@
 # Code source: https://github.com/google/brax/blob/main/brax/training/networks.py
 
 import dataclasses
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
 import flax
@@ -21,23 +21,8 @@ PolicyParams = tuple[PreprocessorParams, Params]
 PRNGKey = jnp.ndarray
 Observation = jnp.ndarray
 Action = jnp.ndarray
-Extra = Mapping[str, Any]
 ActivationFn = Callable[[jnp.ndarray], jnp.ndarray]
 Initializer = Callable[..., Any]
-
-
-class PreprocessObservationFn(Protocol):
-    def __call__(
-        self,
-        observation: Observation,
-        preprocessor_params: PreprocessorParams,
-    ) -> jnp.ndarray:
-        pass
-
-
-def identity_observation_preprocessor(observation: Observation, preprocessor_params: PreprocessorParams):
-    del preprocessor_params
-    return observation
 
 
 class Policy(Protocol):
@@ -45,7 +30,7 @@ class Policy(Protocol):
         self,
         observation: Observation,
         key: PRNGKey,
-    ) -> tuple[Action, Extra]:
+    ) -> Action:
         pass
 
 
@@ -66,11 +51,11 @@ def make_inference_fn(sac_networks: SACNetworks):
     """Creates params and inference function for the SAC agent."""
 
     def make_policy(params: PolicyParams, deterministic: bool = False) -> Policy:
-        def policy(observations: Observation, key_sample: PRNGKey) -> tuple[Action, Extra]:
+        def policy(observations: Observation, key_sample: PRNGKey) -> Action:
             logits = sac_networks.policy_network.apply(*params, observations)
             if deterministic:
-                return sac_networks.parametric_action_distribution.mode(logits), {}
-            return sac_networks.parametric_action_distribution.sample(logits, key_sample), {}
+                return sac_networks.parametric_action_distribution.mode(logits)
+            return sac_networks.parametric_action_distribution.sample(logits, key_sample)
 
         return policy
 
@@ -102,7 +87,6 @@ class MLP(linen.Module):
 def make_policy_network(
     param_size: int,
     obs_size: int,
-    preprocess_observations_fn: PreprocessObservationFn = identity_observation_preprocessor,
     actor_layers: Sequence[int] = (256, 256),
     activation: ActivationFn = linen.relu,
 ) -> FeedForwardNetwork:
@@ -114,18 +98,15 @@ def make_policy_network(
     )
 
     def apply(processor_params, policy_params, obs):
-        obs = preprocess_observations_fn(obs, processor_params)
         return policy_module.apply(policy_params, obs)
 
     dummy_obs = jnp.zeros((1, obs_size))
     return FeedForwardNetwork(init=lambda key: policy_module.init(key, dummy_obs), apply=apply)
 
 
-# Builds the critic Network
 def make_q_network(
     obs_size: int,
     action_size: int,
-    preprocess_observations_fn: PreprocessObservationFn = identity_observation_preprocessor,
     critic_layers: Sequence[int] = (256, 256),
     activation: ActivationFn = linen.relu,
     n_critics: int = 2,
@@ -151,11 +132,11 @@ def make_q_network(
     q_module = QModule(n_critics=n_critics)
 
     def apply(processor_params, q_params, obs, actions):
-        obs = preprocess_observations_fn(obs, processor_params)
         return q_module.apply(q_params, obs, actions)
 
     dummy_obs = jnp.zeros((1, obs_size))
     dummy_action = jnp.zeros((1, action_size))
+
     return FeedForwardNetwork(init=lambda key: q_module.init(key, dummy_obs, dummy_action), apply=apply)
 
 
@@ -163,7 +144,6 @@ def make_q_network(
 def make_sac_networks(
     observation_size: int,
     action_size: int,
-    preprocess_observations_fn: PreprocessObservationFn = identity_observation_preprocessor,
     actor_layers: Sequence[int] = (256, 256),
     critic_layers: Sequence[int] = (256, 256),
     activation: ActivationFn = linen.relu,
@@ -173,7 +153,6 @@ def make_sac_networks(
     policy_network = make_policy_network(
         parametric_action_distribution.param_size,
         observation_size,
-        preprocess_observations_fn=preprocess_observations_fn,
         actor_layers=actor_layers,
         activation=activation,
     )
@@ -181,7 +160,6 @@ def make_sac_networks(
     q_network = make_q_network(
         observation_size,
         action_size,
-        preprocess_observations_fn=preprocess_observations_fn,
         critic_layers=critic_layers,
         activation=activation,
     )
@@ -214,6 +192,7 @@ def make_losses(sac_network: SACNetworks, reward_scaling: float, discount_factor
         log_prob = parametric_action_distribution.log_prob(dist_params, action)
         alpha = jnp.exp(log_alpha)
         alpha_loss = alpha * jax.lax.stop_gradient(-log_prob - target_entropy)
+
         return jnp.mean(alpha_loss)
 
     def critic_loss(
@@ -259,6 +238,7 @@ def make_losses(sac_network: SACNetworks, reward_scaling: float, discount_factor
         q_action = q_network.apply(normalizer_params, q_params, transitions.observation, action)
         min_q = jnp.min(q_action, axis=-1)
         actor_loss = alpha * log_prob - min_q
+
         return jnp.mean(actor_loss)
 
     return alpha_loss, critic_loss, actor_loss
