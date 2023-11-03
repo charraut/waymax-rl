@@ -34,13 +34,41 @@ class Transition(NamedTuple):
 class TrainingState:
     """Contains training state for the learner."""
 
-    policy_optimizer_state: optax.OptState
-    policy_params: Params
-    q_optimizer_state: optax.OptState
-    q_params: Params
-    target_q_params: Params
+    actor_optimizer_state: optax.OptState
+    actor_params: Params
+    critic_optimizer_state: optax.OptState
+    critic_params: Params
+    target_critic_params: Params
     gradient_steps: jnp.ndarray
     env_steps: jnp.ndarray
+
+
+def init_training_state(
+    key: PRNGKey,
+    local_devices_to_use: int,
+    sac_network,
+    actor_optimizer: optax.GradientTransformation,
+    critic_optimizer: optax.GradientTransformation,
+) -> TrainingState:
+    """Inits the training state and replicates it over devices."""
+    key_actor, key_critic = jax.random.split(key)
+
+    actor_params = sac_network.actor_network.init(key_actor)
+    actor_optimizer_state = actor_optimizer.init(actor_params)
+    critic_params = sac_network.critic_network.init(key_critic)
+    critic_optimizer_state = critic_optimizer.init(critic_params)
+
+    training_state = TrainingState(
+        actor_optimizer_state=actor_optimizer_state,
+        actor_params=actor_params,
+        critic_optimizer_state=critic_optimizer_state,
+        critic_params=critic_params,
+        target_critic_params=critic_params,
+        gradient_steps=jnp.zeros(()),
+        env_steps=jnp.zeros(()),
+    )
+
+    return jax.device_put_replicated(training_state, jax.local_devices()[:local_devices_to_use])
 
 
 def load_params(path: str) -> Any:

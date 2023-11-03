@@ -10,8 +10,6 @@ from tensorboardX import SummaryWriter
 
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
 from waymax_rl.algorithms.utils.networks import (
-    Params,
-    SACNetworks,
     gradient_update_fn,
     make_inference_fn,
     make_losses,
@@ -19,6 +17,7 @@ from waymax_rl.algorithms.utils.networks import (
 )
 from waymax_rl.env.env import WaymaxBicycleEnv
 from waymax_rl.env.observations import custom_obs
+from waymax_rl.policy import policy_step, random_step
 from waymax_rl.utils import (
     PMAP_AXIS_NAME,
     Metrics,
@@ -26,29 +25,11 @@ from waymax_rl.utils import (
     Transition,
     assert_is_replicated,
     handle_devices,
+    init_training_state,
     save_params,
     synchronize_hosts,
     unpmap,
 )
-
-
-def actor_step(
-    env,
-    env_state,
-    policy,
-    key: PRNGKey,
-):
-    """Collect data."""
-    actions, _ = policy(env_state.observation, key)
-    nstate = env.step(env_state, actions)
-
-    return nstate, Transition(
-        observation=env_state.observation,
-        action=actions,
-        reward=nstate.reward,
-        discount=1 - nstate.done,
-        next_observation=nstate.observation,
-    )
 
 
 def parse_args():
@@ -86,35 +67,6 @@ def parse_args():
     return args
 
 
-# TO REMOVE OTHER PLACE
-def init_training_state(
-    key: PRNGKey,
-    local_devices_to_use: int,
-    sac_network: SACNetworks,
-    policy_optimizer: optax.GradientTransformation,
-    q_optimizer: optax.GradientTransformation,
-) -> TrainingState:
-    """Inits the training state and replicates it over devices."""
-    key_policy, key_q = jax.random.split(key)
-
-    policy_params = sac_network.policy_network.init(key_policy)
-    policy_optimizer_state = policy_optimizer.init(policy_params)
-    q_params = sac_network.q_network.init(key_q)
-    q_optimizer_state = q_optimizer.init(q_params)
-
-    training_state = TrainingState(
-        policy_optimizer_state=policy_optimizer_state,
-        policy_params=policy_params,
-        q_optimizer_state=q_optimizer_state,
-        q_params=q_params,
-        target_q_params=q_params,
-        gradient_steps=jnp.zeros(()),
-        env_steps=jnp.zeros(()),
-    )
-
-    return jax.device_put_replicated(training_state, jax.local_devices()[:local_devices_to_use])
-
-
 def train(
     environment,
     args,
@@ -145,6 +97,7 @@ def train(
     # Observation & action spaces dimensions
     obs_size = env.observation_spec()
     action_size = env.action_spec().data.shape[0]
+    action_shape = (args.num_envs, action_size)
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
 
@@ -160,8 +113,8 @@ def train(
     make_policy = make_inference_fn(sac_network)
 
     # Optimizers
-    policy_optimizer = optax.adam(learning_rate=args.learning_rate)
-    q_optimizer = optax.adam(learning_rate=args.learning_rate)
+    actor_optimizer = optax.adam(learning_rate=args.learning_rate)
+    critic_optimizer = optax.adam(learning_rate=args.learning_rate)
 
     # Dummy transition (s,a,r,s') to initiate the replay buffer
     dummy_transition = Transition(
@@ -190,16 +143,15 @@ def train(
 
     actor_update = gradient_update_fn(
         actor_loss,
-        policy_optimizer,
+        actor_optimizer,
         pmap_axis_name=PMAP_AXIS_NAME,
     )
     critic_update = gradient_update_fn(
         critic_loss,
-        q_optimizer,
+        critic_optimizer,
         pmap_axis_name=PMAP_AXIS_NAME,
     )
 
-    # One step of stochastic gradient descend for all params (policy params, q params)
     def sgd_step(
         carry: tuple[TrainingState, PRNGKey],
         transitions: Transition,
@@ -208,28 +160,28 @@ def train(
 
         key, key_critic, key_actor = jax.random.split(key, 3)
 
-        critic_loss, q_params, q_optimizer_state = critic_update(
-            training_state.q_params,
-            training_state.policy_params,
-            training_state.target_q_params,
+        critic_loss, critic_params, critic_optimizer_state = critic_update(
+            training_state.critic_params,
+            training_state.actor_params,
+            training_state.target_critic_params,
             alpha,
             transitions,
             key_critic,
-            optimizer_state=training_state.q_optimizer_state,
+            optimizer_state=training_state.critic_optimizer_state,
         )
-        actor_loss, policy_params, policy_optimizer_state = actor_update(
-            training_state.policy_params,
-            training_state.q_params,
+        actor_loss, actor_params, actor_optimizer_state = actor_update(
+            training_state.actor_params,
+            training_state.critic_params,
             alpha,
             transitions,
             key_actor,
-            optimizer_state=training_state.policy_optimizer_state,
+            optimizer_state=training_state.actor_optimizer_state,
         )
 
-        new_target_q_params = jax.tree_util.tree_map(
+        new_target_critic_params = jax.tree_util.tree_map(
             lambda x, y: x * (1 - args.tau) + y * args.tau,
-            training_state.target_q_params,
-            q_params,
+            training_state.target_critic_params,
+            critic_params,
         )
 
         metrics = {
@@ -238,32 +190,17 @@ def train(
         }
 
         new_training_state = TrainingState(
-            policy_optimizer_state=policy_optimizer_state,
-            policy_params=policy_params,
-            q_optimizer_state=q_optimizer_state,
-            q_params=q_params,
-            target_q_params=new_target_q_params,
+            actor_optimizer_state=actor_optimizer_state,
+            actor_params=actor_params,
+            critic_optimizer_state=critic_optimizer_state,
+            critic_params=critic_params,
+            target_critic_params=new_target_critic_params,
             gradient_steps=training_state.gradient_steps + 1,
             env_steps=training_state.env_steps,
         )
 
         return (new_training_state, key), metrics
 
-    # Collect rollout equivalent
-    def get_experience(
-        policy_params: Params,
-        env_state,
-        buffer_state: ReplayBufferState,
-        key: PRNGKey,
-    ):
-        policy = make_policy(policy_params)
-        env_state, transitions = actor_step(env, env_state, policy, key)
-
-        buffer_state = replay_buffer.insert(buffer_state, transitions)
-
-        return env_state, buffer_state
-
-    # Training step --> One step collection (s,a,r,s') + one Sgd step
     def training_step(
         training_state: TrainingState,
         env_state,
@@ -271,16 +208,16 @@ def train(
         key: PRNGKey,
     ):
         experience_key, training_key = jax.random.split(key)
-        env_state, buffer_state = get_experience(
-            training_state.policy_params,
-            env_state,
-            buffer_state,
-            experience_key,
-        )
+
+        policy = make_policy(training_state.actor_params)
+        env_state, transitions = policy_step(env, env_state, policy, experience_key)
+        buffer_state = replay_buffer.insert(buffer_state, transitions)
+
         training_state = training_state.replace(
             env_steps=training_state.env_steps + env_steps_per_actor_step,
         )
 
+        # TODO : Sample batch_size * grad_updates_per_step transitions from the replay buffer
         buffer_state, transitions = replay_buffer.sample(buffer_state)
 
         # Change the front dimension of transitions so 'update_step' is called grad_updates_per_step times by the scan
@@ -300,16 +237,12 @@ def train(
         buffer_state: ReplayBufferState,
         key: PRNGKey,
     ):
-        def f(carry, unused):
-            del unused
+        def f(carry, unused_t):
             training_state, env_state, buffer_state, key = carry
             key, new_key = jax.random.split(key)
-            env_state, buffer_state = get_experience(
-                training_state.policy_params,
-                env_state,
-                buffer_state,
-                key,
-            )
+
+            env_state, transitions = random_step(env, env_state, action_shape, new_key)
+            buffer_state = replay_buffer.insert(buffer_state, transitions)
 
             new_training_state = training_state.replace(
                 env_steps=training_state.env_steps + env_steps_per_actor_step,
@@ -343,15 +276,12 @@ def train(
 
         return training_state, env_state, buffer_state, metrics
 
-    # Note that this is NOT a pure jittable method --> Main training epoch function (in the loop)
     def training_epoch_with_timing(
         training_state: TrainingState,
         env_state,
         buffer_state: ReplayBufferState,
         key: PRNGKey,
     ):
-        nonlocal training_walltime
-
         t = perf_counter()
         (training_state, env_state, buffer_state, metrics) = training_epoch(
             training_state,
@@ -363,11 +293,9 @@ def train(
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), metrics)
 
         epoch_training_time = perf_counter() - t
-        training_walltime += epoch_training_time
         sps = (env_steps_per_actor_step * num_training_steps_per_epoch) / epoch_training_time
         metrics = {
             "training/sps": sps,
-            "training/walltime": training_walltime,
             **{f"training/{name}": value for name, value in metrics.items()},
         }
 
@@ -381,8 +309,8 @@ def train(
         key=global_key,
         local_devices_to_use=local_devices_to_use,
         sac_network=sac_network,
-        policy_optimizer=policy_optimizer,
-        q_optimizer=q_optimizer,
+        actor_optimizer=actor_optimizer,
+        critic_optimizer=critic_optimizer,
     )
     del global_key
 
@@ -413,7 +341,6 @@ def train(
     print("training".center(50, "="))
 
     time_training = perf_counter()
-    training_walltime = perf_counter()
 
     for _ in range(num_epoch):
         time_training_epoch = perf_counter()
@@ -432,7 +359,7 @@ def train(
         if process_id == 0:
             if checkpoint_logdir:
                 # Save current policy
-                params = training_state.policy_params
+                params = training_state.actor_params
                 path = f"{checkpoint_logdir}/model_{current_step}.pkl"
                 save_params(path, params)
 
@@ -445,7 +372,7 @@ def train(
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
 
-    params = training_state.policy_params
+    params = training_state.actor_params
 
     # If there was no mistakes the training_state should still be identical on all devices
     assert_is_replicated(training_state)
@@ -474,5 +401,7 @@ if __name__ == "__main__":
     def progress(num_steps, metrics):
         for key in metrics:
             writer.add_scalar(key, metrics[key], num_steps)
+            print(f"{key}: {metrics[key]}")
+        print()
 
     train(environment=env, args=_args, progress_fn=progress)

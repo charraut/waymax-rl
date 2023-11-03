@@ -42,8 +42,8 @@ class FeedForwardNetwork:
 
 @flax.struct.dataclass
 class SACNetworks:
-    policy_network: FeedForwardNetwork
-    q_network: FeedForwardNetwork
+    actor_network: FeedForwardNetwork
+    critic_network: FeedForwardNetwork
     parametric_action_distribution: ParametricDistribution
 
 
@@ -68,27 +68,27 @@ class MLP(linen.Module):
         return hidden
 
 
-def make_policy_network(
+def make_actor_network(
     param_size: int,
     obs_size: int,
     actor_layers: Sequence[int] = (256, 256),
     activation: ActivationFn = linen.relu,
 ) -> FeedForwardNetwork:
     """Creates a policy network."""
-    policy_module = MLP(
+    actor_module = MLP(
         layer_sizes=list(actor_layers) + [param_size],
         activation=activation,
         kernel_init=jax.nn.initializers.lecun_uniform(),
     )
 
-    def apply(policy_params, obs):
-        return policy_module.apply(policy_params, obs)
+    def apply(actor_params, obs):
+        return actor_module.apply(actor_params, obs)
 
     dummy_obs = jnp.zeros((1, obs_size))
-    return FeedForwardNetwork(init=lambda key: policy_module.init(key, dummy_obs), apply=apply)
+    return FeedForwardNetwork(init=lambda key: actor_module.init(key, dummy_obs), apply=apply)
 
 
-def make_q_network(
+def make_critic_network(
     obs_size: int,
     action_size: int,
     critic_layers: Sequence[int] = (256, 256),
@@ -105,26 +105,26 @@ def make_q_network(
             hidden = jnp.concatenate([obs, actions], axis=-1)
             res = []
             for _ in range(self.n_critics):
-                q = MLP(
+                critic = MLP(
                     layer_sizes=list(critic_layers) + [1],
                     activation=activation,
                     kernel_init=jax.nn.initializers.lecun_uniform(),
                 )(hidden)
-                res.append(q)
+                res.append(critic)
             return jnp.concatenate(res, axis=-1)
 
-    q_module = QModule(n_critics=n_critics)
+    critic_module = QModule(n_critics=n_critics)
 
-    def apply(q_params, obs, actions):
-        return q_module.apply(q_params, obs, actions)
+    def apply(critic_params, obs, actions):
+        return critic_module.apply(critic_params, obs, actions)
 
     dummy_obs = jnp.zeros((1, obs_size))
     dummy_action = jnp.zeros((1, action_size))
 
-    return FeedForwardNetwork(init=lambda key: q_module.init(key, dummy_obs, dummy_action), apply=apply)
+    return FeedForwardNetwork(init=lambda key: critic_module.init(key, dummy_obs, dummy_action), apply=apply)
 
 
-# Builds the SAC network (action dist, pi network, q network)
+# Builds the SAC network (action dist, pi network, critic network)
 def make_sac_networks(
     observation_size: int,
     action_size: int,
@@ -134,14 +134,14 @@ def make_sac_networks(
 ) -> SACNetworks:
     parametric_action_distribution = NormalTanhDistribution(event_size=action_size)
 
-    policy_network = make_policy_network(
+    actor_network = make_actor_network(
         parametric_action_distribution.param_size,
         observation_size,
         actor_layers=actor_layers,
         activation=activation,
     )
 
-    q_network = make_q_network(
+    critic_network = make_critic_network(
         observation_size,
         action_size,
         critic_layers=critic_layers,
@@ -149,8 +149,8 @@ def make_sac_networks(
     )
 
     return SACNetworks(
-        policy_network=policy_network,
-        q_network=q_network,
+        actor_network=actor_network,
+        critic_network=critic_network,
         parametric_action_distribution=parametric_action_distribution,
     )
 
@@ -160,7 +160,7 @@ def make_inference_fn(sac_networks: SACNetworks):
 
     def make_policy(params: PolicyParams, deterministic: bool = False) -> Policy:
         def policy(observations: Observation, key_sample: PRNGKey) -> Action:
-            logits = sac_networks.policy_network.apply(params, observations)
+            logits = sac_networks.actor_network.apply(params, observations)
 
             if deterministic:
                 return sac_networks.parametric_action_distribution.mode(logits)
@@ -175,51 +175,51 @@ def make_inference_fn(sac_networks: SACNetworks):
 def make_losses(sac_network: SACNetworks, reward_scaling: float, discount_factor: float):
     """Creates the SAC losses."""
 
-    policy_network = sac_network.policy_network
-    q_network = sac_network.q_network
+    actor_network = sac_network.actor_network
+    critic_network = sac_network.critic_network
     parametric_action_distribution = sac_network.parametric_action_distribution
 
     def critic_loss(
-        q_params: Params,
-        policy_params: Params,
-        target_q_params: Params,
+        critic_params: Params,
+        actor_params: Params,
+        target_critic_params: Params,
         alpha: float,
         transitions: Transition,
         key: PRNGKey,
     ) -> jnp.ndarray:
-        q_old_action = q_network.apply(q_params, transitions.observation, transitions.action)
-        next_dist_params = policy_network.apply(policy_params, transitions.next_observation)
+        critic_old_action = critic_network.apply(critic_params, transitions.observation, transitions.action)
+        next_dist_params = actor_network.apply(actor_params, transitions.next_observation)
         next_action = parametric_action_distribution.sample_no_postprocessing(next_dist_params, key)
         next_log_prob = parametric_action_distribution.log_prob(next_dist_params, next_action)
         next_action = parametric_action_distribution.postprocess(next_action)
-        next_q = q_network.apply(target_q_params, transitions.next_observation, next_action)
-        next_v = jnp.min(next_q, axis=-1) - alpha * next_log_prob
-        target_q = jax.lax.stop_gradient(
+        next_critic = critic_network.apply(target_critic_params, transitions.next_observation, next_action)
+        next_v = jnp.min(next_critic, axis=-1) - alpha * next_log_prob
+        target_critic = jax.lax.stop_gradient(
             transitions.reward * reward_scaling + transitions.discount * discount_factor * next_v,
         )
-        q_error = q_old_action - jnp.expand_dims(target_q, -1)
+        critic_error = critic_old_action - jnp.expand_dims(target_critic, -1)
 
         # Better bootstrapping for truncated episodes
         truncation = transitions.extras["state_extras"]["truncation"]
-        q_error *= jnp.expand_dims(1 - truncation, -1)
+        critic_error *= jnp.expand_dims(1 - truncation, -1)
 
-        q_loss = 0.5 * jnp.mean(jnp.square(q_error))
-        return q_loss
+        critic_loss = 0.5 * jnp.mean(jnp.square(critic_error))
+        return critic_loss
 
     def actor_loss(
-        policy_params: Params,
-        q_params: Params,
+        actor_params: Params,
+        critic_params: Params,
         alpha: float,
         transitions: Transition,
         key: PRNGKey,
     ) -> jnp.ndarray:
-        dist_params = policy_network.apply(policy_params, transitions.observation)
+        dist_params = actor_network.apply(actor_params, transitions.observation)
         action = parametric_action_distribution.sample_no_postprocessing(dist_params, key)
         log_prob = parametric_action_distribution.log_prob(dist_params, action)
         action = parametric_action_distribution.postprocess(action)
-        q_action = q_network.apply(q_params, transitions.observation, action)
-        min_q = jnp.min(q_action, axis=-1)
-        actor_loss = alpha * log_prob - min_q
+        critic_action = critic_network.apply(critic_params, transitions.observation, action)
+        min_critic = jnp.min(critic_action, axis=-1)
+        actor_loss = alpha * log_prob - min_critic
 
         return jnp.mean(actor_loss)
 
