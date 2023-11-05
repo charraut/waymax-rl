@@ -1,5 +1,6 @@
-from waymax.datatypes import Action, SimulatorState
 import jax.numpy as jnp
+from waymax.datatypes import Action, SimulatorState
+
 
 def reward_follow_ego(state: SimulatorState, action: Action):
     """Follows the agent in the simulator state."""

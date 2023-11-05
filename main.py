@@ -386,7 +386,12 @@ if __name__ == "__main__":
     path_to_save_model = f"runs/waymax/{exp_name}"
 
     t = perf_counter()
-    env = WaymaxBicycleEnv(max_num_objects=_args.max_num_objects, num_envs=_args.num_envs, observation_fn=obs_follow_ego, reward_fn=reward_follow_ego,)
+    env = WaymaxBicycleEnv(
+        max_num_objects=_args.max_num_objects,
+        num_envs=_args.num_envs,
+        observation_fn=obs_follow_ego,
+        reward_fn=reward_follow_ego,
+    )
     print(f"-> Environment creation: {perf_counter() - t:.2f}s")
 
     # Metrics progression of training

@@ -66,7 +66,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             discount=jnp.ones(state.shape + self.discount_spec().shape),
             metrics=self.metrics(initial_state),
         )
-    
+
     def metrics(self, state: datatypes.SimulatorState):
         metric_dict = super().metrics(state)
         for key, metric in metric_dict.items():
