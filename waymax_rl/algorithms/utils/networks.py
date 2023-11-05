@@ -4,33 +4,20 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
-import flax
 import jax
 import jax.numpy as jnp
 import optax
 from flax import linen
 
-from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
-from waymax_rl.utils import Transition
-
-
-Params = Any
-PolicyParams = Any
-PreprocessorParams = Any
-PolicyParams = tuple[PreprocessorParams, Params]
-PRNGKey = jnp.ndarray
-Observation = jnp.ndarray
-Action = jnp.ndarray
-ActivationFn = Callable[[jnp.ndarray], jnp.ndarray]
-Initializer = Callable[..., Any]
+from waymax_rl.types import ActivationFn, Initializer, Params, PRNGKey
 
 
 class Policy(Protocol):
     def __call__(
         self,
-        observation: Observation,
+        observation: jax.Array,
         key: PRNGKey,
-    ) -> Action:
+    ) -> jax.Array:
         pass
 
 
@@ -38,13 +25,6 @@ class Policy(Protocol):
 class FeedForwardNetwork:
     init: Callable[..., Any]
     apply: Callable[..., Any]
-
-
-@flax.struct.dataclass
-class SACNetworks:
-    actor_network: FeedForwardNetwork
-    critic_network: FeedForwardNetwork
-    parametric_action_distribution: ParametricDistribution
 
 
 class MLP(linen.Module):
@@ -74,7 +54,7 @@ def make_actor_network(
     actor_layers: Sequence[int] = (256, 256),
     activation: ActivationFn = linen.relu,
 ) -> FeedForwardNetwork:
-    """Creates a policy network."""
+    """Creates a policy neural_network."""
     actor_module = MLP(
         layer_sizes=list(actor_layers) + [param_size],
         activation=activation,
@@ -124,106 +104,21 @@ def make_critic_network(
     return FeedForwardNetwork(init=lambda key: critic_module.init(key, dummy_obs, dummy_action), apply=apply)
 
 
-# Builds the SAC network (action dist, pi network, critic network)
-def make_sac_networks(
-    observation_size: int,
-    action_size: int,
-    actor_layers: Sequence[int] = (256, 256),
-    critic_layers: Sequence[int] = (256, 256),
-    activation: ActivationFn = linen.relu,
-) -> SACNetworks:
-    parametric_action_distribution = NormalTanhDistribution(event_size=action_size)
+def make_inference_fn(actor_critic_net):
+    """Creates params and inference function."""
 
-    actor_network = make_actor_network(
-        parametric_action_distribution.param_size,
-        observation_size,
-        actor_layers=actor_layers,
-        activation=activation,
-    )
-
-    critic_network = make_critic_network(
-        observation_size,
-        action_size,
-        critic_layers=critic_layers,
-        activation=activation,
-    )
-
-    return SACNetworks(
-        actor_network=actor_network,
-        critic_network=critic_network,
-        parametric_action_distribution=parametric_action_distribution,
-    )
-
-
-def make_inference_fn(sac_networks: SACNetworks):
-    """Creates params and inference function for the SAC agent."""
-
-    def make_policy(params: PolicyParams, deterministic: bool = False) -> Policy:
-        def policy(observations: Observation, key_sample: PRNGKey) -> Action:
-            logits = sac_networks.actor_network.apply(params, observations)
+    def make_policy(params: Params, deterministic: bool = False) -> Policy:
+        def policy(observations: jax.Array, key_sample: PRNGKey) -> jax.Array:
+            logits = actor_critic_net.actor_network.apply(params, observations)
 
             if deterministic:
-                return sac_networks.parametric_action_distribution.mode(logits)
+                return actor_critic_net.parametric_action_distribution.mode(logits)
 
-            return sac_networks.parametric_action_distribution.sample(logits, key_sample)
+            return actor_critic_net.parametric_action_distribution.sample(logits, key_sample)
 
         return policy
 
     return make_policy
-
-
-def make_losses(sac_network: SACNetworks, reward_scaling: float, discount_factor: float):
-    """Creates the SAC losses."""
-
-    actor_network = sac_network.actor_network
-    critic_network = sac_network.critic_network
-    parametric_action_distribution = sac_network.parametric_action_distribution
-
-    def critic_loss(
-        critic_params: Params,
-        actor_params: Params,
-        target_critic_params: Params,
-        alpha: float,
-        transitions: Transition,
-        key: PRNGKey,
-    ) -> jnp.ndarray:
-        critic_old_action = critic_network.apply(critic_params, transitions.observation, transitions.action)
-        next_dist_params = actor_network.apply(actor_params, transitions.next_observation)
-        next_action = parametric_action_distribution.sample_no_postprocessing(next_dist_params, key)
-        next_log_prob = parametric_action_distribution.log_prob(next_dist_params, next_action)
-        next_action = parametric_action_distribution.postprocess(next_action)
-        next_critic = critic_network.apply(target_critic_params, transitions.next_observation, next_action)
-        next_v = jnp.min(next_critic, axis=-1) - alpha * next_log_prob
-        target_critic = jax.lax.stop_gradient(
-            transitions.reward * reward_scaling + transitions.discount * discount_factor * next_v,
-        )
-        critic_error = critic_old_action - jnp.expand_dims(target_critic, -1)
-
-        # Better bootstrapping for truncated episodes
-        truncation = transitions.extras["state_extras"]["truncation"]
-        critic_error *= jnp.expand_dims(1 - truncation, -1)
-
-        critic_loss = 0.5 * jnp.mean(jnp.square(critic_error))
-        return critic_loss
-
-    def actor_loss(
-        actor_params: Params,
-        critic_params: Params,
-        alpha: float,
-        transitions: Transition,
-        key: PRNGKey,
-    ) -> jnp.ndarray:
-        dist_params = actor_network.apply(actor_params, transitions.observation)
-        action = parametric_action_distribution.sample_no_postprocessing(dist_params, key)
-        log_prob = parametric_action_distribution.log_prob(dist_params, action)
-        action = parametric_action_distribution.postprocess(action)
-        critic_action = critic_network.apply(critic_params, transitions.observation, action)
-        min_critic = jnp.min(critic_action, axis=-1)
-        actor_loss = alpha * log_prob - min_critic
-
-        return jnp.mean(actor_loss)
-
-    return critic_loss, actor_loss
 
 
 def loss_and_pgrad(loss_fn: Callable[..., float], pmap_axis_name: str | None, has_aux: bool = False):

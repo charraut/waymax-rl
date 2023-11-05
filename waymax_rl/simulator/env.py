@@ -7,7 +7,7 @@ from waymax.datatypes import Action
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 from waymax.env.wrappers.brax_wrapper import TimeStep
 
-from waymax_rl.env.observations import get_observation_spec
+from waymax_rl.simulator.observations import get_observation_spec
 
 
 class WaymaxBaseEnv(PlanningAgentEnvironment):
@@ -66,6 +66,13 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             discount=jnp.ones(state.shape + self.discount_spec().shape),
             metrics=self.metrics(initial_state),
         )
+    
+    def metrics(self, state: datatypes.SimulatorState):
+        metric_dict = super().metrics(state)
+        for key, metric in metric_dict.items():
+            metric_dict[key] = jnp.mean(metric.value)
+
+        return metric_dict
 
 
 class WaymaxBicycleEnv(WaymaxBaseEnv):

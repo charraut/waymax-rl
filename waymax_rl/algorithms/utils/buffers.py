@@ -4,7 +4,7 @@
 import abc
 import math
 from collections.abc import Sequence
-from typing import Generic, TypeVar
+from typing import Generic
 
 import flax
 import jax
@@ -12,11 +12,8 @@ import jax.numpy as jnp
 from jax import flatten_util
 from jax.experimental import pjit
 
+from waymax_rl.types import Sample, State
 from waymax_rl.utils import PRNGKey
-
-
-State = TypeVar("State")
-Sample = TypeVar("Sample")
 
 
 class ReplayBuffer(abc.ABC, Generic[State, Sample]):

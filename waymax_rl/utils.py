@@ -1,7 +1,6 @@
 import functools
 import pickle
-from collections.abc import Mapping
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, NamedTuple
 
 import flax
 import jax
@@ -9,13 +8,9 @@ import jax.numpy as jnp
 import optax
 from etils import epath
 
+from waymax_rl.types import Params, PRNGKey
 
-Params = Any
-PRNGKey = jnp.ndarray
-Metrics = Mapping[str, jnp.ndarray]
-PolicyParams = Params
-NetworkType = TypeVar("NetworkType")
-ReplayBufferState = Any
+
 PMAP_AXIS_NAME = "i"
 
 
@@ -46,16 +41,16 @@ class TrainingState:
 def init_training_state(
     key: PRNGKey,
     local_devices_to_use: int,
-    sac_network,
+    neural_network,
     actor_optimizer: optax.GradientTransformation,
     critic_optimizer: optax.GradientTransformation,
 ) -> TrainingState:
     """Inits the training state and replicates it over devices."""
     key_actor, key_critic = jax.random.split(key)
 
-    actor_params = sac_network.actor_network.init(key_actor)
+    actor_params = neural_network.actor_network.init(key_actor)
     actor_optimizer_state = actor_optimizer.init(actor_params)
-    critic_params = sac_network.critic_network.init(key_critic)
+    critic_params = neural_network.critic_network.init(key_critic)
     critic_optimizer_state = critic_optimizer.init(critic_params)
 
     training_state = TrainingState(

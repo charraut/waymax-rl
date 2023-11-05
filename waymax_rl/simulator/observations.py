@@ -23,3 +23,18 @@ def custom_obs(state):
         traj = jax.tree_map(lambda x: x.reshape((batch_size, num_envs, -1)), traj)
 
     return traj
+
+
+def obs_follow_ego(state):
+    log_trajectory = state.current_log_trajectory.xy
+    print(log_trajectory.shape)
+
+    if len(log_trajectory.shape) == 5:
+        num_envs = log_trajectory.shape[0]
+        log_trajectory = jax.tree_map(lambda x: x.reshape((num_envs, -1)), log_trajectory)
+    else:
+        batch_size = log_trajectory.shape[0]
+        num_envs = log_trajectory.shape[1]
+        log_trajectory = jax.tree_map(lambda x: x.reshape((batch_size, num_envs, -1)), log_trajectory)
+
+    return log_trajectory

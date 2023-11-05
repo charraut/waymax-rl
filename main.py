@@ -5,22 +5,19 @@ from time import perf_counter
 import jax
 import jax.numpy as jnp
 import optax
-from jax.random import PRNGKey
+from jax.random import PRNGKey, split
 from tensorboardX import SummaryWriter
 
+from waymax_rl.algorithms.sac import make_losses, make_sac_networks
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
-from waymax_rl.algorithms.utils.networks import (
-    gradient_update_fn,
-    make_inference_fn,
-    make_losses,
-    make_sac_networks,
-)
-from waymax_rl.env.env import WaymaxBicycleEnv
-from waymax_rl.env.observations import custom_obs
+from waymax_rl.algorithms.utils.networks import gradient_update_fn, make_inference_fn
 from waymax_rl.policy import policy_step, random_step
+from waymax_rl.simulator.env import WaymaxBicycleEnv
+from waymax_rl.simulator.observations import obs_follow_ego
+from waymax_rl.simulator.rewards import reward_follow_ego
+from waymax_rl.types import Metrics
 from waymax_rl.utils import (
     PMAP_AXIS_NAME,
-    Metrics,
     TrainingState,
     Transition,
     assert_is_replicated,
@@ -38,11 +35,11 @@ def parse_args():
     # Training
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--episode_length", type=int, default=1_000)
-    parser.add_argument("--num_envs", type=int, default=2)
+    parser.add_argument("--num_envs", type=int, default=4)
     parser.add_argument("--grad_updates_per_step", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--log_freq", type=int, default=10)
-    parser.add_argument("--max_num_objects", type=int, default=4)
+    parser.add_argument("--log_freq", type=int, default=100)
+    parser.add_argument("--max_num_objects", type=int, default=16)
     # SAC
     parser.add_argument("--discount_factor", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
@@ -91,8 +88,8 @@ def train(
     # Environment
     env = environment
 
-    rng = jax.random.PRNGKey(args.seed)
-    rng, key = jax.random.split(rng)
+    rng = PRNGKey(args.seed)
+    rng, key = split(rng)
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec()
@@ -158,7 +155,7 @@ def train(
     ) -> tuple[tuple[TrainingState, PRNGKey], Metrics]:
         training_state, key = carry
 
-        key, key_critic, key_actor = jax.random.split(key, 3)
+        key, key_critic, key_actor = split(key, 3)
 
         critic_loss, critic_params, critic_optimizer_state = critic_update(
             training_state.critic_params,
@@ -201,36 +198,6 @@ def train(
 
         return (new_training_state, key), metrics
 
-    def training_step(
-        training_state: TrainingState,
-        env_state,
-        buffer_state: ReplayBufferState,
-        key: PRNGKey,
-    ):
-        experience_key, training_key = jax.random.split(key)
-
-        policy = make_policy(training_state.actor_params)
-        env_state, transitions = policy_step(env, env_state, policy, experience_key)
-        buffer_state = replay_buffer.insert(buffer_state, transitions)
-
-        training_state = training_state.replace(
-            env_steps=training_state.env_steps + env_steps_per_actor_step,
-        )
-
-        # TODO : Sample batch_size * grad_updates_per_step transitions from the replay buffer
-        buffer_state, transitions = replay_buffer.sample(buffer_state)
-
-        # Change the front dimension of transitions so 'update_step' is called grad_updates_per_step times by the scan
-        transitions = jax.tree_util.tree_map(
-            lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
-            transitions,
-        )
-        (training_state, _), metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
-
-        metrics["buffer_current_size"] = replay_buffer.size(buffer_state)
-
-        return training_state, env_state, buffer_state, metrics
-
     def prefill_replay_buffer(
         training_state: TrainingState,
         env_state,
@@ -239,7 +206,7 @@ def train(
     ):
         def f(carry, unused_t):
             training_state, env_state, buffer_state, key = carry
-            key, new_key = jax.random.split(key)
+            key, new_key = split(key)
 
             env_state, transitions = random_step(env, env_state, action_shape, new_key)
             buffer_state = replay_buffer.insert(buffer_state, transitions)
@@ -252,6 +219,41 @@ def train(
 
         return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
 
+    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name=PMAP_AXIS_NAME)
+
+    def training_step(
+        training_state: TrainingState,
+        env_state,
+        buffer_state: ReplayBufferState,
+        key: PRNGKey,
+    ):
+        experience_key, training_key = split(key)
+
+        policy = make_policy(training_state.actor_params)
+        env_state, transitions = policy_step(env, env_state, policy, experience_key)
+        buffer_state = replay_buffer.insert(buffer_state, transitions)
+
+        training_state = training_state.replace(
+            env_steps=training_state.env_steps + env_steps_per_actor_step,
+        )
+
+        buffer_state, transitions = replay_buffer.sample(buffer_state)
+
+        # Change the front dimension of transitions so 'update_step' is called grad_updates_per_step times by the scan
+        transitions = jax.tree_util.tree_map(
+            lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
+            transitions,
+        )
+        (training_state, _), metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
+
+        metrics = {
+            "training/buffer_current_size": replay_buffer.size(buffer_state),
+            "metrics/reward": jnp.mean(transitions.reward),
+            **{f"metrics/{name}": value for name, value in env_state.metrics.items()},
+        }
+
+        return training_state, env_state, buffer_state, metrics
+
     def training_epoch(
         training_state: TrainingState,
         env_state,
@@ -260,7 +262,7 @@ def train(
     ):
         def f(carry, unused_t):
             ts, es, bs, k = carry
-            k, new_key = jax.random.split(k)
+            k, new_key = split(k)
             ts, es, bs, metrics = training_step(ts, es, bs, k)
 
             return (ts, es, bs, new_key), metrics
@@ -275,6 +277,8 @@ def train(
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
         return training_state, env_state, buffer_state, metrics
+
+    training_epoch = jax.pmap(training_epoch, axis_name=PMAP_AXIS_NAME)
 
     def training_epoch_with_timing(
         training_state: TrainingState,
@@ -301,31 +305,26 @@ def train(
 
         return training_state, env_state, buffer_state, metrics
 
-    global_key, local_key = jax.random.split(rng)
+    global_key, local_key = split(rng)
     local_key = jax.random.fold_in(local_key, process_id)
 
-    # Training state init
     training_state = init_training_state(
         key=global_key,
         local_devices_to_use=local_devices_to_use,
-        sac_network=sac_network,
+        neural_network=sac_network,
         actor_optimizer=actor_optimizer,
         critic_optimizer=critic_optimizer,
     )
     del global_key
 
-    local_key, rb_key = jax.random.split(local_key, 2)
+    local_key, rb_key = split(local_key, 2)
 
-    # Function compilation
-    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name=PMAP_AXIS_NAME)
-    training_epoch = jax.pmap(training_epoch, axis_name=PMAP_AXIS_NAME)
-    buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, local_devices_to_use))
-
+    buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
     env_state = jax.pmap(env.reset)(env.new_scenario)
 
     # Create and initialize the replay buffer
-    prefill_key, local_key = jax.random.split(local_key)
-    prefill_keys = jax.random.split(prefill_key, local_devices_to_use)
+    prefill_key, local_key = split(local_key)
+    prefill_keys = split(prefill_key, local_devices_to_use)
 
     training_state, env_state, buffer_state, _ = prefill_replay_buffer(
         training_state,
@@ -335,7 +334,6 @@ def train(
     )
 
     # Main training loop
-    metrics = {}
     current_step = 0
     print(f"-> Pre-training: {perf_counter() - start_train_func:.2f}s")
     print("training".center(50, "="))
@@ -344,8 +342,8 @@ def train(
 
     for _ in range(num_epoch):
         time_training_epoch = perf_counter()
-        epoch_key, local_key = jax.random.split(local_key)
-        epoch_keys = jax.random.split(epoch_key, local_devices_to_use)
+        epoch_key, local_key = split(local_key)
+        epoch_keys = split(epoch_key, local_devices_to_use)
         (training_state, env_state, buffer_state, training_metrics) = training_epoch_with_timing(
             training_state,
             env_state,
@@ -378,7 +376,7 @@ def train(
     assert_is_replicated(training_state)
     synchronize_hosts()
 
-    return (make_policy, params, metrics)
+    return (make_policy, params)
 
 
 if __name__ == "__main__":
@@ -387,9 +385,9 @@ if __name__ == "__main__":
     exp_name = "SAC"
     path_to_save_model = f"runs/waymax/{exp_name}"
 
-    env = WaymaxBicycleEnv(max_num_objects=_args.max_num_objects, num_envs=_args.num_envs, observation_fn=custom_obs)
-
-    metrics_filter = ["training/sps", "training/walltime", "eval/episode_reward", "eval/sps", "eval/walltime"]
+    t = perf_counter()
+    env = WaymaxBicycleEnv(max_num_objects=_args.max_num_objects, num_envs=_args.num_envs, observation_fn=obs_follow_ego, reward_fn=reward_follow_ego,)
+    print(f"-> Environment creation: {perf_counter() - t:.2f}s")
 
     # Metrics progression of training
     writer = SummaryWriter(path_to_save_model)
