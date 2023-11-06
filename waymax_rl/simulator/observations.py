@@ -1,40 +1,25 @@
 import jax
 from waymax.datatypes.observation import observation_from_state
+from waymax import config
+import jax.numpy as jnp
+
+def get_observation_spec(sample_obs, observation_fn):
+    sample_obs = jax.tree_map(lambda x: x[0], sample_obs)
+    observation = observation_fn(sample_obs)
+
+    return observation.shape[-1]
 
 
-def get_observation_spec(sample_obs):
-    num_envs = sample_obs.shape[1]
-    _sample_obs = jax.tree_map(lambda x: x[0], sample_obs)
-    _sample_obs = jax.tree_map(lambda x: x.reshape((num_envs, -1)), _sample_obs)
+def obs_follow_ego(state, num_steps=10, coordinate_frame=config.CoordinateFrame.OBJECT):
+    batch_dims = state.batch_dims[-1]
+    observation = observation_from_state(state, obs_num_steps=num_steps)
 
-    return _sample_obs.shape[-1]
+    ego_index = jnp.nonzero(observation.is_ego, size=batch_dims)[1]
 
+    trajectory = observation.trajectory.xy
+    batch_indices = jnp.arange(batch_dims)
 
-def custom_obs(state):
-    obs = observation_from_state(state)
-    traj = obs.trajectory.xy
+    ego_trajectory = trajectory[batch_indices, ego_index]
+    ego_trajectory = jnp.reshape(ego_trajectory, (batch_dims, -1))
 
-    if len(traj.shape) == 5:
-        num_envs = traj.shape[0]
-        traj = jax.tree_map(lambda x: x.reshape((num_envs, -1)), traj)
-    else:
-        batch_size = traj.shape[0]
-        num_envs = traj.shape[1]
-        traj = jax.tree_map(lambda x: x.reshape((batch_size, num_envs, -1)), traj)
-
-    return traj
-
-
-def obs_follow_ego(state):
-    log_trajectory = state.current_log_trajectory.xy
-    print(log_trajectory.shape)
-
-    if len(log_trajectory.shape) == 5:
-        num_envs = log_trajectory.shape[0]
-        log_trajectory = jax.tree_map(lambda x: x.reshape((num_envs, -1)), log_trajectory)
-    else:
-        batch_size = log_trajectory.shape[0]
-        num_envs = log_trajectory.shape[1]
-        log_trajectory = jax.tree_map(lambda x: x.reshape((batch_size, num_envs, -1)), log_trajectory)
-
-    return log_trajectory
+    return ego_trajectory
