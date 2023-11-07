@@ -15,7 +15,7 @@ from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplin
 from waymax_rl.algorithms.utils.networks import gradient_update_fn, make_inference_fn
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBicycleEnv
-from waymax_rl.simulator.observations import obs_global
+from waymax_rl.simulator.observations import obs_global_with_target
 from waymax_rl.types import Metrics
 from waymax_rl.utils import (
     PMAP_AXIS_NAME,
@@ -34,10 +34,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=50_000_000)
-    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--total_timesteps", type=int, default=20_000_000)
+    parser.add_argument("--num_envs", type=int, default=4)
     parser.add_argument("--grad_updates_per_step", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--log_freq", type=int, default=100)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
@@ -385,13 +385,11 @@ if __name__ == "__main__":
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
 
-    t = perf_counter()
     env = WaymaxBicycleEnv(
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
-        observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
+        observation_fn=partial(obs_global_with_target, num_steps=_args.trajectory_length),
     )
-    print(f"-> Environment creation: {perf_counter() - t:.2f}s")
 
     # Metrics progression of training
     writer = SummaryWriter(path_to_save_model)
