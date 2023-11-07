@@ -25,17 +25,17 @@ def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Ar
 
     # Normalize the log_trajectory
     mean = log_trajectory.mean(axis=(2, 3), keepdims=True)
-    std = log_trajectory.std(axis=(2, 3), keepdims=True)
+    std = log_trajectory.std(axis=(2, 3), keepdims=True) + 1e-6
     log_trajectory = (log_trajectory - mean) / std
 
     # Normalize the trajectory
     mean = trajectory.mean(axis=(2, 3, 4), keepdims=True)
-    std = trajectory.std(axis=(2, 3, 4), keepdims=True)
+    std = trajectory.std(axis=(2, 3, 4), keepdims=True) + 1e-6
     trajectory = (trajectory - mean) / std
 
     # Normalize the roadgraph
     mean = roadgraph_static_points.mean(axis=(2, 3), keepdims=True)
-    std = roadgraph_static_points.std(axis=(2, 3), keepdims=True)
+    std = roadgraph_static_points.std(axis=(2, 3), keepdims=True) + 1e-6
     roadgraph_static_points = (roadgraph_static_points - mean) / std
 
     # Reshape
@@ -60,12 +60,12 @@ def obs_global(state: SimulatorState, num_steps: int = 10) -> jax.Array:
 
     # Normalize the trajectory
     mean = trajectory.mean(axis=(2, 3, 4), keepdims=True)
-    std = trajectory.std(axis=(2, 3, 4), keepdims=True)
+    std = trajectory.std(axis=(2, 3, 4), keepdims=True) + 1e-6
     trajectory = (trajectory - mean) / std
 
     # Normalize the roadgraph
     mean = roadgraph_static_points.mean(axis=(2, 3), keepdims=True)
-    std = roadgraph_static_points.std(axis=(2, 3), keepdims=True)
+    std = roadgraph_static_points.std(axis=(2, 3), keepdims=True) + 1e-6
     roadgraph_static_points = (roadgraph_static_points - mean) / std
 
     # Reshape
