@@ -1,5 +1,6 @@
 import argparse
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from functools import partial
 from time import perf_counter
 
@@ -14,7 +15,7 @@ from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplin
 from waymax_rl.algorithms.utils.networks import gradient_update_fn, make_inference_fn
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBicycleEnv
-from waymax_rl.simulator.observations import obs_follow_ego
+from waymax_rl.simulator.observations import obs_global
 from waymax_rl.types import Metrics
 from waymax_rl.utils import (
     PMAP_AXIS_NAME,
@@ -33,10 +34,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=50_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--log_freq", type=int, default=100)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
@@ -46,10 +47,10 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=500_000)
+    parser.add_argument("--buffer_size", type=int, default=1_000_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
     parser.add_argument("--action_repeat", type=int, default=1)
@@ -376,7 +377,8 @@ if __name__ == "__main__":
     _args = parse_args()
 
     exp_name = "SAC"
-    path_to_save_model = f"runs/waymax/{exp_name}"
+    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
+    path_to_save_model = f"runs/{exp_name}_{run_time}"
 
     # Print parameters
     print("parameters".center(50, "="))
@@ -387,7 +389,7 @@ if __name__ == "__main__":
     env = WaymaxBicycleEnv(
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
-        observation_fn=partial(obs_follow_ego, num_steps=_args.trajectory_length),
+        observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
     )
     print(f"-> Environment creation: {perf_counter() - t:.2f}s")
 
@@ -404,4 +406,4 @@ if __name__ == "__main__":
             print(f"{key}: {metrics[key]}")
         print()
 
-    train(environment=env, args=_args, progress_fn=progress)
+    train(environment=env, args=_args, progress_fn=progress, checkpoint_logdir=path_to_save_model)
