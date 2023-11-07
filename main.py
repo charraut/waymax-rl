@@ -36,11 +36,11 @@ def parse_args():
     # Training
     parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--episode_length", type=int, default=1_000)
-    parser.add_argument("--num_envs", type=int, default=4)
-    parser.add_argument("--grad_updates_per_step", type=int, default=4)
+    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--log_freq", type=int, default=100)
-    parser.add_argument("--max_num_objects", type=int, default=64)
+    parser.add_argument("--max_num_objects", type=int, default=32)
     parser.add_argument("--trajectory_length", type=int, default=5)
     # SAC
     parser.add_argument("--discount_factor", type=float, default=0.99)
@@ -316,7 +316,7 @@ def train(
     local_key, rb_key = split(local_key, 2)
 
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
-    env_state = jax.pmap(env.reset)(env.new_scenario)
+    env_state = jax.pmap(env.reset)(env.init_scenario)
 
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)

@@ -7,8 +7,6 @@ from waymax.datatypes import Action
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 from waymax.env.wrappers.brax_wrapper import TimeStep
 
-from waymax_rl.simulator.observations import get_observation_spec
-
 
 class WaymaxBaseEnv(PlanningAgentEnvironment):
     def __init__(
@@ -39,10 +37,10 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         if reward_fn is not None:
             self.reward = reward_fn
 
-        self._observation_spec = get_observation_spec(sample_obs=self.new_scenario, observation_fn=self.observe)
-
     def observation_spec(self):
-        return self._observation_spec
+        observation = self.observe(self.new_scenario)
+
+        return observation.shape[-1]
 
     @property
     def max_num_objects(self):
@@ -53,8 +51,12 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._num_envs
 
     @property
-    def new_scenario(self):
+    def init_scenario(self):
         return next(self._scenarios)
+
+    @property
+    def new_scenario(self):
+        return jax.tree_map(lambda x: x[0], self.init_scenario)
 
     def reset(self, state: datatypes.SimulatorState) -> TimeStep:
         initial_state = super().reset(state)
@@ -102,11 +104,22 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         discount = jnp.logical_not(termination).astype(jnp.float32)
         metric_dict = self.metrics(timestep.state)
 
-        return TimeStep(
-            state=next_state,
-            reward=reward,
-            observation=obs,
-            done=termination,
-            discount=discount,
-            metrics=metric_dict,
-        )
+        def _not_done():
+            return TimeStep(
+                state=next_state,
+                reward=reward,
+                observation=obs,
+                done=termination,
+                discount=discount,
+                metrics=metric_dict,
+            )
+
+        def _done():
+            return self.reset(self.new_scenario)
+
+        return jax.lax.cond(jnp.all(done), _done, _not_done)
+
+
+
+
+
