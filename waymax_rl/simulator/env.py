@@ -21,6 +21,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         reward_fn: callable = None,
     ) -> None:
         super().__init__(dynamics_model, env_config)
+
         self._max_num_objects = max_num_objects
         self._num_envs = num_envs
 
@@ -38,7 +39,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         if reward_fn is not None:
             self.reward = reward_fn
 
-        self._observation_spec = get_observation_spec(self.observe(self.new_scenario))
+        self._observation_spec = get_observation_spec(sample_obs=self.new_scenario, observation_fn=self.observe)
 
     def observation_spec(self):
         return self._observation_spec

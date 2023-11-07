@@ -1,7 +1,7 @@
 import argparse
 from collections.abc import Callable, Sequence
 from time import perf_counter
-
+from functools import partial
 import jax
 import jax.numpy as jnp
 import optax
@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--log_freq", type=int, default=100)
     parser.add_argument("--max_num_objects", type=int, default=16)
+    parser.add_argument("--trajectory_length", type=int, default=10)
     # SAC
     parser.add_argument("--discount_factor", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
@@ -71,11 +72,6 @@ def train(
     checkpoint_logdir: str | None = None,
 ):
     start_train_func = perf_counter()
-
-    # Print parameters
-    print("parameters".center(50, "="))
-    for key, value in vars(args).items():
-        print(f"{key}: {value}")
 
     # Devices handling
     process_id, local_devices_to_use, device_count = handle_devices(args.max_devices_per_host)
@@ -198,29 +194,6 @@ def train(
 
         return (new_training_state, key), metrics
 
-    def prefill_replay_buffer(
-        training_state: TrainingState,
-        env_state,
-        buffer_state: ReplayBufferState,
-        key: PRNGKey,
-    ):
-        def f(carry, unused_t):
-            training_state, env_state, buffer_state, key = carry
-            key, new_key = split(key)
-
-            env_state, transitions = random_step(env, env_state, action_shape, new_key)
-            buffer_state = replay_buffer.insert(buffer_state, transitions)
-
-            new_training_state = training_state.replace(
-                env_steps=training_state.env_steps + env_steps_per_actor_step,
-            )
-
-            return (new_training_state, env_state, buffer_state, new_key), ()
-
-        return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
-
-    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name=PMAP_AXIS_NAME)
-
     def training_step(
         training_state: TrainingState,
         env_state,
@@ -253,6 +226,29 @@ def train(
         }
 
         return training_state, env_state, buffer_state, metrics
+
+    def prefill_replay_buffer(
+        training_state: TrainingState,
+        env_state,
+        buffer_state: ReplayBufferState,
+        key: PRNGKey,
+    ):
+        def f(carry, unused_t):
+            training_state, env_state, buffer_state, key = carry
+            key, new_key = split(key)
+
+            env_state, transitions = random_step(env, env_state, action_shape, new_key)
+            buffer_state = replay_buffer.insert(buffer_state, transitions)
+
+            new_training_state = training_state.replace(
+                env_steps=training_state.env_steps + env_steps_per_actor_step,
+            )
+
+            return (new_training_state, env_state, buffer_state, new_key), ()
+
+        return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
+
+    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name=PMAP_AXIS_NAME)
 
     def training_epoch(
         training_state: TrainingState,
@@ -385,11 +381,18 @@ if __name__ == "__main__":
     exp_name = "SAC"
     path_to_save_model = f"runs/waymax/{exp_name}"
 
+    # Print parameters
+    print("parameters".center(50, "="))
+    for key, value in vars(_args).items():
+        print(f"{key}: {value}")
+
+
+
     t = perf_counter()
     env = WaymaxBicycleEnv(
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
-        observation_fn=obs_follow_ego,
+        observation_fn=partial(obs_follow_ego, num_steps=_args.trajectory_length),
         reward_fn=reward_follow_ego,
     )
     print(f"-> Environment creation: {perf_counter() - t:.2f}s")

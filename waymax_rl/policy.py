@@ -18,6 +18,7 @@ def policy_step(env, env_state, policy, key: PRNGKey):
 
 
 def random_step(env, env_state, action_shape, key: PRNGKey):
+    # NOTE: Hard-coded action space
     actions = jax.random.uniform(key=key, shape=action_shape, minval=-1.0, maxval=1.0)
     nstate = env.step(env_state, actions)
 
