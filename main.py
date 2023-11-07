@@ -316,8 +316,8 @@ def train(
     local_key, rb_key = split(local_key, 2)
 
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
-    env_state = jax.pmap(env.reset)()
-
+    env_state = jax.pmap(env.reset)
+    
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)
     prefill_keys = split(prefill_key, local_devices_to_use)
