@@ -25,6 +25,7 @@ from waymax_rl.utils import (
     handle_devices,
     init_training_state,
     save_params,
+    save_args,
     synchronize_hosts,
     unpmap,
 )
@@ -399,6 +400,8 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(_args).items()])),
     )
+    # Save args
+    save_args(_args, path_to_save_model)
 
     def progress(num_steps, metrics):
         for key in metrics:
