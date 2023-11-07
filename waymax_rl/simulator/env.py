@@ -18,6 +18,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         observation_fn: callable = None,
         reward_fn: callable = None,
         eval_mode: bool = False,
+        seed: int = 0,
     ) -> None:
         super().__init__(dynamics_model, env_config)
 
@@ -99,7 +100,16 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         eval_mode: bool = False,
     ) -> None:
         dynamics_model = dynamics.InvertibleBicycleModel(normalize_actions=normalize_actions)
-        env_config = config.EnvironmentConfig(max_num_objects=max_num_objects)
+        env_config = config.EnvironmentConfig(
+            max_num_objects=max_num_objects,
+            # metrics=config.MetricsConfig(
+            #     run_sdc_wrongway=True,
+            #     run_sdc_progression=True,
+            #     run_sdc_off_route=True,
+            #     run_sdc_kinematic_infeasibility=True,
+            # ),
+            rewards=config.LinearCombinationRewardConfig(rewards={"overlap": -1.0, "offroad": -1.0, "log_divergence": -0.1}),
+        )
 
         super().__init__(dynamics_model, env_config, max_num_objects, num_envs, observation_fn, reward_fn, eval_mode)
 

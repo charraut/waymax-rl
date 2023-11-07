@@ -33,13 +33,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--episode_length", type=int, default=1_000)
+    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--grad_updates_per_step", type=int, default=1)
+    parser.add_argument("--grad_updates_per_step", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--log_freq", type=int, default=100)
-    parser.add_argument("--max_num_objects", type=int, default=32)
+    parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
     # SAC
     parser.add_argument("--discount_factor", type=float, default=0.99)
@@ -53,7 +52,6 @@ def parse_args():
     parser.add_argument("--buffer_size", type=int, default=500_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
-    parser.add_argument("--deterministic_eval", type=bool, default=True)
     parser.add_argument("--action_repeat", type=int, default=1)
     parser.add_argument("--reward_scaling", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
@@ -219,7 +217,7 @@ def train(
         (training_state, _), metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
 
         metrics = {
-            "training/buffer_current_size": replay_buffer.size(buffer_state),
+            "rollout/buffer_current_size": replay_buffer.size(buffer_state),
             "metrics/reward": jnp.mean(transitions.reward),
             **{f"metrics/{name}": value for name, value in env_state.metrics.items()},
         }
@@ -294,8 +292,8 @@ def train(
         epoch_training_time = perf_counter() - t
         sps = (env_steps_per_actor_step * num_training_steps_per_epoch) / epoch_training_time
         metrics = {
-            "training/sps": sps,
-            **{f"training/{name}": value for name, value in metrics.items()},
+            "rollout/sps": sps,
+            **{f"{name}": value for name, value in metrics.items()},
         }
 
         return training_state, env_state, buffer_state, metrics
@@ -359,7 +357,7 @@ def train(
             progress_fn(current_step, training_metrics)
 
             print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
-            print(f"- Time : {time_epoch_done:.2f}s - ({training_metrics['training/sps']:.2f} steps/s)")
+            print(f"- Time : {time_epoch_done:.2f}s - ({training_metrics['rollout/sps']:.2f} steps/s)")
             print()
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
