@@ -1,7 +1,8 @@
 import argparse
 from collections.abc import Callable, Sequence
-from time import perf_counter
 from functools import partial
+from time import perf_counter
+
 import jax
 import jax.numpy as jnp
 import optax
@@ -33,17 +34,17 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--episode_length", type=int, default=1_000)
     parser.add_argument("--num_envs", type=int, default=4)
-    parser.add_argument("--grad_updates_per_step", type=int, default=2)
+    parser.add_argument("--grad_updates_per_step", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--log_freq", type=int, default=100)
-    parser.add_argument("--max_num_objects", type=int, default=16)
-    parser.add_argument("--trajectory_length", type=int, default=10)
+    parser.add_argument("--max_num_objects", type=int, default=64)
+    parser.add_argument("--trajectory_length", type=int, default=5)
     # SAC
     parser.add_argument("--discount_factor", type=float, default=0.99)
-    parser.add_argument("--learning_rate", type=float, default=3e-4)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
@@ -56,7 +57,6 @@ def parse_args():
     parser.add_argument("--deterministic_eval", type=bool, default=True)
     parser.add_argument("--action_repeat", type=int, default=1)
     parser.add_argument("--reward_scaling", type=int, default=1)
-    parser.add_argument("--normalize_observations", type=bool, default=True)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max_devices_per_host", type=int, default=1)
 
@@ -385,8 +385,6 @@ if __name__ == "__main__":
     print("parameters".center(50, "="))
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
-
-
 
     t = perf_counter()
     env = WaymaxBicycleEnv(

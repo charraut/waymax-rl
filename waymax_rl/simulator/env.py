@@ -106,7 +106,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             state=next_state,
             reward=reward,
             observation=obs,
-            done=done,
+            done=termination,
             discount=discount,
             metrics=metric_dict,
         )
