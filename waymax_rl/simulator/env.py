@@ -2,8 +2,8 @@ import dataclasses
 
 import jax
 import jax.numpy as jnp
-from waymax import config, dataloader, datatypes, dynamics
-from waymax.datatypes import Action
+from waymax import config, dataloader, dynamics
+from waymax.datatypes import Action, SimulatorState
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 from waymax.env.wrappers.brax_wrapper import TimeStep
 
@@ -48,7 +48,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             self.reward = reward_fn
 
     def observation_spec(self):
-        observation = self.observe(self.next_scenario_from_batch)
+        observation = self.observe(self.next_scenario)
 
         return observation.shape[-1]
 
@@ -61,27 +61,26 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._num_envs
 
     @property
-    def next_scenario(self):
+    def init_scenario(self):
         return next(self._scenarios)
 
     @property
-    def next_scenario_from_batch(self):
-        return jax.tree_map(lambda x: x[0], self.next_scenario)
+    def next_scenario(self):
+        return jax.tree_map(lambda x: x[0], self.init_scenario)
 
-    def reset(self, keys) -> TimeStep:
-        scenario = self.next_scenario if self._eval_mode else self.next_scenario_from_batch
-        initial_state = super().reset(scenario)
+    def reset(self, state: SimulatorState) -> TimeStep:
+        initial_state = super().reset(state)
 
         return TimeStep(
             state=initial_state,
             observation=self.observe(initial_state),
             done=self.termination(initial_state),
-            reward=jnp.zeros(initial_state.shape + self.reward_spec().shape),
-            discount=jnp.ones(initial_state.shape + self.discount_spec().shape),
+            reward=jnp.zeros(state.shape + self.reward_spec().shape),
+            discount=jnp.ones(state.shape + self.discount_spec().shape),
             metrics=self.metrics(initial_state),
         )
 
-    def metrics(self, state: datatypes.SimulatorState):
+    def metrics(self, state: SimulatorState):
         metric_dict = super().metrics(state)
         for key, metric in metric_dict.items():
             metric_dict[key] = jnp.mean(metric.value)
@@ -128,6 +127,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             )
 
         def _done():
-            return self.reset()
+            return self.reset(self.next_scenario)
 
         return jax.lax.cond(jnp.all(done), _done, _not_done)

@@ -15,7 +15,6 @@ from waymax_rl.algorithms.utils.networks import gradient_update_fn, make_inferen
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBicycleEnv
 from waymax_rl.simulator.observations import obs_follow_ego
-from waymax_rl.simulator.rewards import reward_follow_ego
 from waymax_rl.types import Metrics
 from waymax_rl.utils import (
     PMAP_AXIS_NAME,
@@ -316,8 +315,8 @@ def train(
     local_key, rb_key = split(local_key, 2)
 
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
-    env_state = jax.pmap(env.reset)
-    
+    env_state = jax.pmap(env.reset)(env.init_scenario)
+
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)
     prefill_keys = split(prefill_key, local_devices_to_use)
