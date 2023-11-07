@@ -34,7 +34,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--episode_length", type=int, default=1_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
@@ -316,7 +316,7 @@ def train(
     local_key, rb_key = split(local_key, 2)
 
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
-    env_state = jax.pmap(env.reset)(env.init_scenario)
+    env_state = jax.pmap(env.reset)()
 
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)
@@ -391,7 +391,6 @@ if __name__ == "__main__":
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
         observation_fn=partial(obs_follow_ego, num_steps=_args.trajectory_length),
-        reward_fn=reward_follow_ego,
     )
     print(f"-> Environment creation: {perf_counter() - t:.2f}s")
 
