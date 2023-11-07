@@ -151,11 +151,9 @@ def handle_devices(max_devices_per_host):
 
 
 # Args save & load
-def save_args(args, obs_size, action_size, path):
+def save_args(args, path):
     with open(path + '/training_args.txt', 'w') as f:
         json.dump(args.__dict__, f, indent=2)
-        json.dump(obs_size, f, indent=2)
-        json.dump(action_size, f, indent=2)
 
 def load_args(path):
     parser = ArgumentParser()
