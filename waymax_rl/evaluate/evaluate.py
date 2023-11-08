@@ -2,7 +2,7 @@ import os
 from jax.random import PRNGKey, split
 from waymax import visualization
 from waymax_rl.simulator.env import WaymaxBicycleEnv
-from waymax_rl.simulator.observations import obs_global_eval
+from waymax_rl.simulator.observations import obs_global_eval, obs_global_with_target_eval
 from waymax_rl.utils import load_params, load_args
 from functools import partial
 
@@ -13,7 +13,7 @@ import mediapy
 import jax
 
 def load_model(env, args, path_to_model):
-    obs_size = 167 # env.observation_spec(eval_mode=True)  TO DO 
+    obs_size = 445 # env.observation_spec(eval_mode=True)  TO DO 
     action_size = env.action_spec().data.shape[0]
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
@@ -32,7 +32,7 @@ def load_model(env, args, path_to_model):
     params = load_params(path_to_model)
     params = jax.tree_map(lambda x:x[0], params)
 
-    return make_policy(params), action_size 
+    return make_policy(params, deterministic=True), action_size 
 
 def eval_policy(env, args, path_to_model, nb_episodes=5, render=False):
 
@@ -97,10 +97,10 @@ if __name__ == '__main__':
     env = WaymaxBicycleEnv(
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
-        observation_fn=partial(obs_global_eval, num_steps=_args.trajectory_length),
+        observation_fn=partial(obs_global_with_target_eval, num_steps=_args.trajectory_length),
         eval_mode=True
     )
 
-    path_to_model = path_to_trained_model + 'model_384800.pkl'
+    path_to_model = path_to_trained_model + 'model_1020100.pkl'
     eval_policy(env, _args, path_to_model, nb_episodes=10, render=True)
 
