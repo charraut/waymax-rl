@@ -104,9 +104,8 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             max_num_objects=max_num_objects,
             rewards=config.LinearCombinationRewardConfig(
                 rewards={
-                    "overlap": -2.0,
-                    "offroad": -2.0,
-                    "log_divergence": -0.2,
+                    "overlap": -1.0,
+                    "offroad": -1.0,
                 },
             ),
         )
