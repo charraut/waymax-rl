@@ -1,7 +1,7 @@
+import jax
 import jax.numpy as jnp
 from waymax.datatypes import SimulatorState
 from waymax.datatypes.observation import sdc_observation_from_state, transform_trajectory
-import jax
 
 
 def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Array:
