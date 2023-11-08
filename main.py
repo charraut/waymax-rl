@@ -18,7 +18,6 @@ from waymax_rl.simulator.env import WaymaxBicycleEnv
 from waymax_rl.simulator.observations import obs_global
 from waymax_rl.types import Metrics
 from waymax_rl.utils import (
-    PMAP_AXIS_NAME,
     TrainingState,
     Transition,
     assert_is_replicated,
@@ -87,7 +86,6 @@ def train(
     env = environment
 
     rng = PRNGKey(args.seed)
-    rng, key = split(rng)
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec()
@@ -139,12 +137,12 @@ def train(
     actor_update = gradient_update_fn(
         actor_loss,
         actor_optimizer,
-        pmap_axis_name=PMAP_AXIS_NAME,
+        pmap_axis_name="i",
     )
     critic_update = gradient_update_fn(
         critic_loss,
         critic_optimizer,
-        pmap_axis_name=PMAP_AXIS_NAME,
+        pmap_axis_name="i",
     )
 
     def sgd_step(
@@ -251,8 +249,6 @@ def train(
 
         return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
 
-    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name=PMAP_AXIS_NAME)
-
     def training_epoch(
         training_state: TrainingState,
         env_state,
@@ -276,8 +272,6 @@ def train(
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
         return training_state, env_state, buffer_state, metrics
-
-    training_epoch = jax.pmap(training_epoch, axis_name=PMAP_AXIS_NAME)
 
     def training_epoch_with_timing(
         training_state: TrainingState,
@@ -320,6 +314,8 @@ def train(
 
     local_key, rb_key = split(local_key, 2)
 
+    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
+    training_epoch = jax.pmap(training_epoch, axis_name="i")
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
     env_state = jax.pmap(env.init)(env.iter_scenario)
 

@@ -13,9 +13,6 @@ from etils import epath
 from waymax_rl.types import Params, PRNGKey
 
 
-PMAP_AXIS_NAME = "i"
-
-
 class Transition(NamedTuple):
     """Container for a transition."""
 

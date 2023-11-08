@@ -10,7 +10,7 @@ def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Ar
 
     # Extract all the data from the observation
     sdc_pos = observation.pose2d.original_xy  # (batch_dims, 1, 2)
-    sdc_yaw = observation.pose2d.original_yaw  # (batch_dims, 1, 1)
+    sdc_yaw = observation.pose2d.original_yaw  # (batch_dims, 1, 1)\
     trajectory = observation.trajectory.xy  # (batch_dims, 1, num_objects, num_steps, 2)
     roadgraph_static_points = observation.roadgraph_static_points.xy  # (batch_dims, 1, roadgraph_top_k, 2)
 
@@ -45,7 +45,10 @@ def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Ar
     sdc_pos = jnp.reshape(sdc_pos, (*batch_dims, -1))
     sdc_yaw = jnp.reshape(sdc_yaw, (*batch_dims, -1))
 
-    return jnp.concatenate([log_trajectory, trajectory, roadgraph_static_points, sdc_pos, sdc_yaw], axis=len(batch_dims))
+    return jnp.concatenate(
+        [log_trajectory, trajectory, roadgraph_static_points, sdc_pos, sdc_yaw],
+        axis=len(batch_dims),
+    )
 
 
 def obs_global(state: SimulatorState, num_steps: int = 10) -> jax.Array:
