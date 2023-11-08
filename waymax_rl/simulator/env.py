@@ -49,7 +49,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             self.reward = reward_fn
 
     def observation_spec(self):
-        observation = self.observe(self.next_scenario)
+        observation = self.observe(self.iter_scenario)
 
         return observation.shape[-1]
 
@@ -62,12 +62,8 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._num_envs
 
     @property
-    def init_scenario(self):
+    def iter_scenario(self):
         return next(self._scenarios)
-
-    @property
-    def next_scenario(self):
-        return jax.tree_map(lambda x: x[0], self.init_scenario)
 
     def reset(self, state: SimulatorState) -> TimeStep:
         initial_state = super().reset(state)
@@ -136,9 +132,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             )
 
         def _done():
-            if self._eval_mode:
-                return self.reset(self.init_scenario)
-            else:
-                return self.reset(self.next_scenario)
+            return self.reset(self.iter_scenario)
 
         return jax.lax.cond(jnp.all(done), _done, _not_done)
