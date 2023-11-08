@@ -15,7 +15,7 @@ from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplin
 from waymax_rl.algorithms.utils.networks import gradient_update_fn, make_inference_fn
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBicycleEnv
-from waymax_rl.simulator.observations import obs_global, obs_global_with_target
+from waymax_rl.simulator.observations import obs_global
 from waymax_rl.types import Metrics
 from waymax_rl.utils import (
     PMAP_AXIS_NAME,
@@ -24,8 +24,8 @@ from waymax_rl.utils import (
     assert_is_replicated,
     handle_devices,
     init_training_state,
-    save_params,
     save_args,
+    save_params,
     synchronize_hosts,
     unpmap,
 )

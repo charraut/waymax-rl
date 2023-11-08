@@ -1,5 +1,7 @@
 import functools
+import json
 import pickle
+from argparse import ArgumentParser
 from typing import Any, NamedTuple
 
 import flax
@@ -7,8 +9,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from etils import epath
-import json
-from argparse import ArgumentParser
+
 from waymax_rl.types import Params, PRNGKey
 
 
@@ -149,16 +150,16 @@ def handle_devices(max_devices_per_host):
     return process_id, local_devices_to_use, device_count
 
 
-
 # Args save & load
 def save_args(args, path):
-    with open(path + '/training_args.txt', 'w') as f:
+    with open(path + "/training_args.txt", "w") as f:
         json.dump(args.__dict__, f, indent=2)
+
 
 def load_args(path):
     parser = ArgumentParser()
     args = parser.parse_args()
-    with open(path + 'training_args.txt', 'r') as f:
+    with open(path + "training_args.txt") as f:
         args.__dict__ = json.load(f)
-    
+
     return args
