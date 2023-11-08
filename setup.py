@@ -12,6 +12,7 @@ def read_requirements():
 
 setup(
     name="waymax-rl",
+    packages=["waymax_rl"],
     version="0.1",
     description="",
     python_requires=">=3.10",

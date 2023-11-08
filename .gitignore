@@ -3,3 +3,4 @@ venv/
 runs/
 models/
 eval_scenarios/
+waymax_rl.egg-info/
