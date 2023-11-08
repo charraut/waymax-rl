@@ -136,6 +136,9 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             )
 
         def _done():
-            return self.reset(self.next_scenario)
+            if self._eval_mode:
+                return self.reset(self.init_scenario)
+            else:
+                return self.reset(self.next_scenario)
 
         return jax.lax.cond(jnp.all(done), _done, _not_done)
