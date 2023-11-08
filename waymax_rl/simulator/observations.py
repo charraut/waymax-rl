@@ -5,7 +5,7 @@ from waymax.datatypes.observation import sdc_observation_from_state, transform_t
 
 
 def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Array:
-    batch_dims = state.batch_dims[-1]
+    batch_dims = state.batch_dims
     observation = sdc_observation_from_state(state, obs_num_steps=num_steps, roadgraph_top_k=50)
 
     # Extract all the data from the observation
@@ -39,13 +39,13 @@ def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Ar
     roadgraph_static_points = (roadgraph_static_points - mean) / std
 
     # Reshape
-    log_trajectory = jnp.reshape(log_trajectory, (batch_dims, -1))
-    trajectory = jnp.reshape(trajectory, (batch_dims, -1))
-    roadgraph_static_points = jnp.reshape(roadgraph_static_points, (batch_dims, -1))
-    sdc_pos = jnp.reshape(sdc_pos, (batch_dims, -1))
-    sdc_yaw = jnp.reshape(sdc_yaw, (batch_dims, -1))
+    log_trajectory = jnp.reshape(log_trajectory, (*batch_dims, -1))
+    trajectory = jnp.reshape(trajectory, (*batch_dims, -1))
+    roadgraph_static_points = jnp.reshape(roadgraph_static_points, (*batch_dims, -1))
+    sdc_pos = jnp.reshape(sdc_pos, (*batch_dims, -1))
+    sdc_yaw = jnp.reshape(sdc_yaw, (*batch_dims, -1))
 
-    return jnp.concatenate([log_trajectory, trajectory, roadgraph_static_points, sdc_pos, sdc_yaw], axis=1)
+    return jnp.concatenate([log_trajectory, trajectory, roadgraph_static_points, sdc_pos, sdc_yaw], axis=len(batch_dims))
 
 
 def obs_global(state: SimulatorState, num_steps: int = 10) -> jax.Array:
