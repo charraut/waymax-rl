@@ -35,11 +35,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=20_000_000)
-    parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--grad_updates_per_step", type=int, default=1)
+    parser.add_argument("--total_timesteps", type=int, default=2_000_000)
+    parser.add_argument("--num_envs", type=int, default=4)
+    parser.add_argument("--grad_updates_per_step", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--log_freq", type=int, default=100)
+    parser.add_argument("--log_freq", type=int, default=500)
+    parser.add_argument("--num_save", type=int, default=1)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
     # SAC
@@ -48,16 +49,16 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=1_000_000)
+    parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
     parser.add_argument("--action_repeat", type=int, default=1)
     parser.add_argument("--reward_scaling", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max_devices_per_host", type=int, default=1)
+    parser.add_argument("--max_devices_per_host", type=int, default=None)
 
     args = parser.parse_args()
 
@@ -77,8 +78,10 @@ def train(
 
     env_steps_per_actor_step = args.action_repeat * args.num_envs
     num_prefill_actor_steps = args.learning_start // args.num_envs
-    num_epoch = max(args.log_freq - 1, 1)
+    num_epoch = max(args.log_freq, 1)
     num_training_steps_per_epoch = args.total_timesteps // (num_epoch * env_steps_per_actor_step)
+
+    save_freq = num_epoch // args.num_save
 
     # Environment
     env = environment
@@ -216,6 +219,7 @@ def train(
             lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
             transitions,
         )
+
         (training_state, _), metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
 
         metrics = {
@@ -282,12 +286,14 @@ def train(
         key: PRNGKey,
     ):
         t = perf_counter()
-        (training_state, env_state, buffer_state, metrics) = training_epoch(
+
+        training_state, env_state, buffer_state, metrics = training_epoch(
             training_state,
             env_state,
             buffer_state,
             key,
         )
+
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), metrics)
 
@@ -335,7 +341,7 @@ def train(
 
     time_training = perf_counter()
 
-    for _ in range(num_epoch):
+    for i in range(num_epoch):
         time_training_epoch = perf_counter()
         epoch_key, local_key = split(local_key)
         epoch_keys = split(epoch_key, local_devices_to_use)
@@ -350,22 +356,25 @@ def train(
 
         # Eval and logging
         if process_id == 0:
-            if checkpoint_logdir:
+            if checkpoint_logdir and not i % save_freq:
                 # Save current policy
                 params = training_state.actor_params
                 path = f"{checkpoint_logdir}/model_{current_step}.pkl"
                 save_params(path, params)
 
-            progress_fn(current_step, training_metrics)
-
             print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
             print(f"- Time : {time_epoch_done:.2f}s - ({training_metrics['rollout/sps']:.2f} steps/s)")
+            progress_fn(current_step, training_metrics)
             print()
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
 
     params = training_state.actor_params
+
+    if checkpoint_logdir:
+        path = f"{checkpoint_logdir}/model_final.pkl"
+        save_params(path, params)
 
     # If there was no mistakes the training_state should still be identical on all devices
     assert_is_replicated(training_state)
@@ -386,13 +395,11 @@ if __name__ == "__main__":
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
 
-    t = perf_counter()
     env = WaymaxBicycleEnv(
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
         observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
     )
-    print(f"-> Environment creation: {perf_counter() - t:.2f}s")
 
     # Metrics progression of training
     writer = SummaryWriter(path_to_save_model)
@@ -400,6 +407,7 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(_args).items()])),
     )
+
     # Save args
     save_args(_args, path_to_save_model)
 
