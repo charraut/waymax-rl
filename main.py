@@ -109,21 +109,18 @@ def train(
     actor_optimizer = optax.adam(learning_rate=args.learning_rate)
     critic_optimizer = optax.adam(learning_rate=args.learning_rate)
 
-    # Dummy transition (s,a,r,s') to initiate the replay buffer
-    dummy_transition = Transition(
-        observation=jnp.zeros((obs_size,)),
-        action=jnp.zeros((action_size,)),
-        reward=0.0,
-        discount=0.0,
-        next_observation=jnp.zeros((obs_size,)),
-        extras={"state_extras": {"truncation": 0.0}, "policy_extras": {}},
-    )
-
     # Create Replay Buffer
     replay_buffer = UniformSamplingQueue(
+        num_envs=args.num_envs // device_count,
         buffer_size=args.buffer_size // device_count,
-        dummy_data_sample=dummy_transition,
-        sample_batch_size=args.batch_size * args.grad_updates_per_step // device_count,
+        batch_size=args.batch_size * args.grad_updates_per_step // device_count,
+        dummy_data_sample=Transition(
+            observation=jnp.zeros((obs_size,)),
+            action=jnp.zeros((action_size,)),
+            reward=0.0,
+            discount=0.0,
+            next_observation=jnp.zeros((obs_size,)),
+        ),
     )
 
     # Create losses and grad functions for SAC losses
@@ -144,6 +141,27 @@ def train(
         critic_optimizer,
         pmap_axis_name="i",
     )
+
+    def prefill_replay_buffer(
+        training_state: TrainingState,
+        env_state,
+        buffer_state: ReplayBufferState,
+        key: PRNGKey,
+    ):
+        def f(carry, unused_t):
+            training_state, env_state, buffer_state, key = carry
+            key, new_key = split(key)
+
+            env_state, transitions = random_step(env, env_state, action_shape, key)
+            buffer_state = replay_buffer.insert(buffer_state, transitions)
+
+            new_training_state = training_state.replace(
+                env_steps=training_state.env_steps + env_steps_per_actor_step,
+            )
+
+            return (new_training_state, env_state, buffer_state, new_key), ()
+
+        return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
 
     def sgd_step(
         carry: tuple[TrainingState, PRNGKey],
@@ -212,7 +230,6 @@ def train(
 
         buffer_state, transitions = replay_buffer.sample(buffer_state)
 
-        # Change the front dimension of transitions so 'update_step' is called grad_updates_per_step times by the scan
         transitions = jax.tree_util.tree_map(
             lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
             transitions,
@@ -227,27 +244,6 @@ def train(
         }
 
         return training_state, env_state, buffer_state, metrics
-
-    def prefill_replay_buffer(
-        training_state: TrainingState,
-        env_state,
-        buffer_state: ReplayBufferState,
-        key: PRNGKey,
-    ):
-        def f(carry, unused_t):
-            training_state, env_state, buffer_state, key = carry
-            key, new_key = split(key)
-
-            env_state, transitions = random_step(env, env_state, action_shape, new_key)
-            buffer_state = replay_buffer.insert(buffer_state, transitions)
-
-            new_training_state = training_state.replace(
-                env_steps=training_state.env_steps + env_steps_per_actor_step,
-            )
-
-            return (new_training_state, env_state, buffer_state, new_key), ()
-
-        return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
 
     def training_epoch(
         training_state: TrainingState,
@@ -270,33 +266,6 @@ def train(
         )
 
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
-
-        return training_state, env_state, buffer_state, metrics
-
-    def training_epoch_with_timing(
-        training_state: TrainingState,
-        env_state,
-        buffer_state: ReplayBufferState,
-        key: PRNGKey,
-    ):
-        t = perf_counter()
-
-        training_state, env_state, buffer_state, metrics = training_epoch(
-            training_state,
-            env_state,
-            buffer_state,
-            key,
-        )
-
-        metrics = jax.tree_util.tree_map(jnp.mean, metrics)
-        jax.tree_util.tree_map(lambda x: x.block_until_ready(), metrics)
-
-        epoch_training_time = perf_counter() - t
-        sps = (env_steps_per_actor_step * num_training_steps_per_epoch) / epoch_training_time
-        metrics = {
-            "rollout/sps": sps,
-            **{f"{name}": value for name, value in metrics.items()},
-        }
 
         return training_state, env_state, buffer_state, metrics
 
@@ -338,17 +307,30 @@ def train(
     time_training = perf_counter()
 
     for i in range(num_epoch):
-        time_training_epoch = perf_counter()
         epoch_key, local_key = split(local_key)
         epoch_keys = split(epoch_key, local_devices_to_use)
-        (training_state, env_state, buffer_state, training_metrics) = training_epoch_with_timing(
+
+        t = perf_counter()
+        (training_state, env_state, buffer_state, training_metrics) = training_epoch(
             training_state,
             env_state,
             buffer_state,
             epoch_keys,
         )
+        epoch_training_time = perf_counter() - t
+
         current_step = int(unpmap(training_state.env_steps))
-        time_epoch_done = perf_counter() - time_training_epoch
+        sps = int((env_steps_per_actor_step * num_training_steps_per_epoch) / epoch_training_time)
+
+        training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)
+
+        training_metrics = {
+            "rollout/sps": sps,
+            **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
+        }
+
+        current_step = int(unpmap(training_state.env_steps))
 
         # Eval and logging
         if process_id == 0:
@@ -359,9 +341,7 @@ def train(
                 save_params(path, params)
 
             print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
-            print(f"- Time : {time_epoch_done:.2f}s - ({training_metrics['rollout/sps']:.2f} steps/s)")
             progress_fn(current_step, training_metrics)
-            print()
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps

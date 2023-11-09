@@ -79,10 +79,6 @@ def make_losses(sac_network, reward_scaling: float, discount_factor: float):
         )
         critic_error = critic_old_action - jnp.expand_dims(target_critic, -1)
 
-        # Better bootstrapping for truncated episodes
-        truncation = transitions.extras["state_extras"]["truncation"]
-        critic_error *= jnp.expand_dims(1 - truncation, -1)
-
         critic_loss = 0.5 * jnp.mean(jnp.square(critic_error))
         return critic_loss
 
