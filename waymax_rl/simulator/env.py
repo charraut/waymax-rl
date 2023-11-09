@@ -62,7 +62,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._num_envs
 
     @property
-    def iter_scenario(self):
+    def iter_scenario(self) -> SimulatorState:
         return next(self._scenarios)
 
     def init(self, state: SimulatorState) -> TimeStep:
@@ -77,11 +77,8 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             metrics=self.metrics(initial_state),
         )
 
-    def reset(self) -> TimeStep:
-        new_state = self.iter_scenario
-        new_state = jax.tree_map(lambda x: x[0], new_state)
-
-        return self.init(new_state)
+    def reset(self, state: SimulatorState) -> TimeStep:
+        return self.init(jax.tree_map(lambda x: x[0], state))
 
     def metrics(self, state: SimulatorState):
         metric_dict = super().metrics(state)
@@ -138,6 +135,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             )
 
         def _done():
-            return self.reset()
+            return self.reset(self.iter_scenario)
 
         return jax.lax.cond(jnp.all(done), _done, _not_done)

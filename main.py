@@ -34,7 +34,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=2_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
     parser.add_argument("--num_envs", type=int, default=4)
     parser.add_argument("--grad_updates_per_step", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -111,7 +111,7 @@ def train(
 
     # Create Replay Buffer
     replay_buffer = UniformSamplingQueue(
-        num_envs=args.num_envs // device_count,
+        num_envs=args.num_envs,
         buffer_size=args.buffer_size // device_count,
         batch_size=args.batch_size * args.grad_updates_per_step // device_count,
         dummy_data_sample=Transition(
