@@ -142,27 +142,6 @@ def train(
         pmap_axis_name="i",
     )
 
-    def prefill_replay_buffer(
-        training_state: TrainingState,
-        env_state,
-        buffer_state: ReplayBufferState,
-        key: PRNGKey,
-    ):
-        def f(carry, unused_t):
-            training_state, env_state, buffer_state, key = carry
-            key, new_key = split(key)
-
-            env_state, transitions = random_step(env, env_state, action_shape, key)
-            buffer_state = replay_buffer.insert(buffer_state, transitions)
-
-            new_training_state = training_state.replace(
-                env_steps=training_state.env_steps + env_steps_per_actor_step,
-            )
-
-            return (new_training_state, env_state, buffer_state, new_key), ()
-
-        return jax.lax.scan(f, (training_state, env_state, buffer_state, key), (), length=num_prefill_actor_steps)[0]
-
     def sgd_step(
         carry: tuple[TrainingState, PRNGKey],
         transitions: Transition,
@@ -212,16 +191,42 @@ def train(
 
         return (new_training_state, key), metrics
 
+    def prefill_replay_buffer(
+        training_state: TrainingState,
+        simulator_state,
+        buffer_state: ReplayBufferState,
+        key: PRNGKey,
+    ):
+        def f(carry, unused_t):
+            training_state, simulator_state, buffer_state, key = carry
+            key, new_key = split(key)
+
+            simulator_state, transitions = random_step(env, simulator_state, action_shape, key)
+            buffer_state = replay_buffer.insert(buffer_state, transitions)
+
+            new_training_state = training_state.replace(
+                env_steps=training_state.env_steps + env_steps_per_actor_step,
+            )
+
+            return (new_training_state, simulator_state, buffer_state, new_key), ()
+
+        return jax.lax.scan(
+            f,
+            (training_state, simulator_state, buffer_state, key),
+            (),
+            length=num_prefill_actor_steps,
+        )[0]
+
     def training_step(
         training_state: TrainingState,
-        env_state,
+        simulator_state,
         buffer_state: ReplayBufferState,
         key: PRNGKey,
     ):
         experience_key, training_key = split(key)
 
         policy = make_policy(training_state.actor_params)
-        env_state, transitions = policy_step(env, env_state, policy, experience_key)
+        simulator_state, transitions, _metrics = policy_step(env, simulator_state, policy, experience_key)
         buffer_state = replay_buffer.insert(buffer_state, transitions)
 
         training_state = training_state.replace(
@@ -240,14 +245,14 @@ def train(
         metrics = {
             "rollout/buffer_current_size": replay_buffer.size(buffer_state),
             "metrics/reward": jnp.mean(transitions.reward),
-            **{f"metrics/{name}": value for name, value in env_state.metrics.items()},
+            **{f"metrics/{name}": value for name, value in _metrics.items()},
         }
 
-        return training_state, env_state, buffer_state, metrics
+        return training_state, simulator_state, buffer_state, metrics
 
     def training_epoch(
         training_state: TrainingState,
-        env_state,
+        simulator_state,
         buffer_state: ReplayBufferState,
         key: PRNGKey,
     ):
@@ -258,16 +263,16 @@ def train(
 
             return (ts, es, bs, new_key), metrics
 
-        (training_state, env_state, buffer_state, key), metrics = jax.lax.scan(
+        (training_state, simulator_state, buffer_state, key), metrics = jax.lax.scan(
             f,
-            (training_state, env_state, buffer_state, key),
+            (training_state, simulator_state, buffer_state, key),
             (),
             length=num_training_steps_per_epoch,
         )
 
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
-        return training_state, env_state, buffer_state, metrics
+        return training_state, simulator_state, buffer_state, metrics
 
     global_key, local_key = split(rng)
     local_key = jax.random.fold_in(local_key, process_id)
@@ -286,15 +291,15 @@ def train(
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
     training_epoch = jax.pmap(training_epoch, axis_name="i")
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
-    env_state = jax.pmap(env.init)(env.iter_scenario)
+    simulator_state = jax.pmap(env.init)(env.iter_scenario)
 
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)
     prefill_keys = split(prefill_key, local_devices_to_use)
 
-    training_state, env_state, buffer_state, _ = prefill_replay_buffer(
+    training_state, simulator_state, buffer_state, _ = prefill_replay_buffer(
         training_state,
-        env_state,
+        simulator_state,
         buffer_state,
         prefill_keys,
     )
@@ -311,9 +316,9 @@ def train(
         epoch_keys = split(epoch_key, local_devices_to_use)
 
         t = perf_counter()
-        (training_state, env_state, buffer_state, training_metrics) = training_epoch(
+        (training_state, simulator_state, buffer_state, training_metrics) = training_epoch(
             training_state,
-            env_state,
+            simulator_state,
             buffer_state,
             epoch_keys,
         )

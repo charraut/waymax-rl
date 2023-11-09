@@ -4,28 +4,39 @@ from jax.random import PRNGKey
 from waymax_rl.utils import Transition
 
 
-def policy_step(env, env_state, policy, key: PRNGKey):
-    actions = policy(env_state.observation, key)
-    nstate = env.step(env_state, actions)
+def policy_step(env, simulator_state, policy, key: PRNGKey):
+    obs = env.observe(simulator_state)
 
-    return nstate, Transition(
-        observation=env_state.observation,
+    actions = policy(obs, key)
+    episode_slice = env.step(simulator_state, actions)
+
+    state = episode_slice.state
+    transition = Transition(
+        observation=obs,
         action=actions,
-        reward=nstate.reward,
-        discount=1 - nstate.done,
-        next_observation=nstate.observation,
+        reward=episode_slice.reward,
+        discount=1 - episode_slice.done,
+        next_observation=episode_slice.observation,
     )
+    metrics = episode_slice.metrics
+
+    return state, transition, metrics
 
 
-def random_step(env, env_state, action_shape, key: PRNGKey):
+def random_step(env, simulator_state, action_shape, key: PRNGKey):
+    obs = env.observe(simulator_state)
+
     # NOTE: Hard-coded action space
     actions = jax.random.uniform(key=key, shape=action_shape, minval=-1.0, maxval=1.0)
-    nstate = env.step(env_state, actions)
+    episode_slice = env.step(simulator_state, actions)
 
-    return nstate, Transition(
-        observation=env_state.observation,
+    state = episode_slice.state
+    transition = Transition(
+        observation=obs,
         action=actions,
-        reward=nstate.reward,
-        discount=1 - nstate.done,
-        next_observation=nstate.observation,
+        reward=episode_slice.reward,
+        discount=1 - episode_slice.done,
+        next_observation=episode_slice.observation,
     )
+
+    return state, transition

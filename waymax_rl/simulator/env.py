@@ -1,11 +1,39 @@
 import dataclasses
+from typing import Any
 
+import chex
 import jax
 import jax.numpy as jnp
+from flax import struct
 from waymax import config, dataloader, dynamics
-from waymax.datatypes import Action, SimulatorState
+from waymax.datatypes import Action, Observation, SimulatorState
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
-from waymax.env.wrappers.brax_wrapper import TimeStep
+
+from waymax_rl.types import Metrics
+
+
+@chex.dataclass(frozen=True)
+class EpisodeSlice:
+    """Container class for Waymax transitions.
+
+    Attributes:
+      state: The current simulation state of shape (...).
+      observation: The current observation of shape (..,).
+      reward: The reward obtained in the current transition of shape (...,
+        num_objects).
+      done: A boolean array denoting the end of an episode of shape (...).
+      discount: An array of discount values of shape (...).
+      metrics: Optional dictionary of metrics.
+      info: Optional dictionary of arbitrary logging information.
+    """
+
+    state: SimulatorState
+    observation: Observation
+    reward: jax.Array
+    done: jax.Array
+    discount: jax.Array
+    metrics: Metrics = struct.field(default_factory=dict)
+    info: dict[str, Any] = struct.field(default_factory=dict)
 
 
 class WaymaxBaseEnv(PlanningAgentEnvironment):
@@ -65,20 +93,21 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
     def iter_scenario(self) -> SimulatorState:
         return next(self._scenarios)
 
-    def init(self, state: SimulatorState) -> TimeStep:
-        initial_state = super().reset(state)
+    def init(self, state: SimulatorState) -> SimulatorState:
+        return super().reset(state)
 
-        return TimeStep(
-            state=initial_state,
-            observation=self.observe(initial_state),
-            done=self.termination(initial_state),
+    def reset(self) -> EpisodeSlice:
+        state = jax.tree_map(lambda x: x[0], self.iter_scenario)
+        state = self.init(state)
+
+        return EpisodeSlice(
+            state=state,
+            observation=self.observe(state),
+            done=self.termination(state),
             reward=jnp.zeros(state.shape + self.reward_spec().shape),
             discount=jnp.ones(state.shape + self.discount_spec().shape),
-            metrics=self.metrics(initial_state),
+            metrics=self.metrics(state),
         )
-
-    def reset(self, state: SimulatorState) -> TimeStep:
-        return self.init(jax.tree_map(lambda x: x[0], state))
 
     def metrics(self, state: SimulatorState):
         metric_dict = super().metrics(state)
@@ -111,30 +140,39 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
 
         super().__init__(dynamics_model, env_config, max_num_objects, num_envs, observation_fn, reward_fn, eval_mode)
 
-    def step(self, timestep: TimeStep, action: jax.Array) -> TimeStep:
+    def step(self, state: SimulatorState, action: jax.Array) -> EpisodeSlice:
+        # Validate and wrap the action
         _action = Action(data=action, valid=jnp.ones_like(action[..., 0:1], dtype=jnp.bool_))
         _action.validate()
 
-        next_state = super().step(timestep.state, _action)
+        # Compute the next state and observations
+        next_state = super().step(state, _action)
         obs = self.observe(next_state)
-        reward = self.reward(timestep.state, _action)
+
+        # Calculate the reward and check for termination and truncation conditions
+        reward = self.reward(state, _action)
         termination = self.termination(next_state)
         truncation = self.truncation(next_state)
         done = jnp.logical_or(termination, truncation)
-        discount = jnp.logical_not(termination).astype(jnp.float32)
-        metric_dict = self.metrics(timestep.state)
 
-        def _not_done():
-            return TimeStep(
+        # Determine the discount factor
+        discount = jnp.where(termination, 0.0, 1.0)
+
+        # Collect metrics if any
+        metric_dict = self.metrics(state)
+
+        # Create the next timestep based on whether the episode is done
+        next_timestep = jax.lax.cond(
+            jnp.all(done),
+            lambda: self.reset(),
+            lambda: EpisodeSlice(
                 state=next_state,
                 reward=reward,
                 observation=obs,
                 done=termination,
                 discount=discount,
                 metrics=metric_dict,
-            )
+            ),
+        )
 
-        def _done():
-            return self.reset(self.iter_scenario)
-
-        return jax.lax.cond(jnp.all(done), _done, _not_done)
+        return next_timestep
