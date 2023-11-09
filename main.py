@@ -257,11 +257,11 @@ def train(
         key: PRNGKey,
     ):
         def f(carry, unused_t):
-            ts, es, bs, k = carry
+            ts, ss, bs, k = carry
             k, new_key = split(k)
-            ts, es, bs, metrics = training_step(ts, es, bs, k)
+            ts, ss, bs, metrics = training_step(ts, ss, bs, k)
 
-            return (ts, es, bs, new_key), metrics
+            return (ts, ss, bs, new_key), metrics
 
         (training_state, simulator_state, buffer_state, key), metrics = jax.lax.scan(
             f,
