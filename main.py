@@ -21,7 +21,6 @@ from waymax_rl.utils import (
     TrainingState,
     Transition,
     assert_is_replicated,
-    handle_devices,
     init_training_state,
     save_args,
     save_params,
@@ -57,7 +56,6 @@ def parse_args():
     parser.add_argument("--action_repeat", type=int, default=1)
     parser.add_argument("--reward_scaling", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max_devices_per_host", type=int, default=None)
 
     args = parser.parse_args()
 
@@ -65,7 +63,6 @@ def parse_args():
 
 
 def train(
-    environment,
     args,
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     checkpoint_logdir: str | None = None,
@@ -73,17 +70,22 @@ def train(
     start_train_func = perf_counter()
 
     # Devices handling
-    process_id, local_devices_to_use, device_count = handle_devices(args.max_devices_per_host)
+    num_devices = min(jax.local_device_count(), args.num_envs)
 
     env_steps_per_actor_step = args.action_repeat * args.num_envs
     num_prefill_actor_steps = args.learning_start // args.num_envs
     num_epoch = max(args.log_freq, 1)
     num_training_steps_per_epoch = args.total_timesteps // (num_epoch * env_steps_per_actor_step)
-
     save_freq = num_epoch // args.num_save
 
+    batch_dims = (num_devices, args.num_envs // num_devices)
+
     # Environment
-    env = environment
+    env = WaymaxBicycleEnv(
+        max_num_objects=args.max_num_objects,
+        batch_dims=batch_dims,
+        observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
+    )
 
     rng = PRNGKey(args.seed)
 
@@ -93,6 +95,13 @@ def train(
     action_shape = (args.num_envs, action_size)
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
+
+    print("device".center(50, "="))
+    print(f"batch_dims: {batch_dims}")
+    print(f"num_devices: {num_devices}")
+    print(f"jax.local_devices_to_use: {jax.local_device_count()}")
+    print(f"jax.default_backend(): {jax.default_backend()}")
+    print(f"jax.local_devices(): {jax.local_devices()}")
 
     # Builds the SAC networks
     sac_network = make_sac_networks(
@@ -111,9 +120,8 @@ def train(
 
     # Create Replay Buffer
     replay_buffer = UniformSamplingQueue(
-        num_envs=args.num_envs,
-        buffer_size=args.buffer_size // device_count,
-        batch_size=args.batch_size * args.grad_updates_per_step // device_count,
+        buffer_size=args.buffer_size // num_devices,
+        batch_size=args.batch_size * args.grad_updates_per_step // num_devices,
         dummy_data_sample=Transition(
             observation=jnp.zeros((obs_size,)),
             action=jnp.zeros((action_size,)),
@@ -275,11 +283,10 @@ def train(
         return training_state, simulator_state, buffer_state, metrics
 
     global_key, local_key = split(rng)
-    local_key = jax.random.fold_in(local_key, process_id)
 
     training_state = init_training_state(
         key=global_key,
-        local_devices_to_use=local_devices_to_use,
+        num_devices=num_devices,
         neural_network=sac_network,
         actor_optimizer=actor_optimizer,
         critic_optimizer=critic_optimizer,
@@ -290,12 +297,17 @@ def train(
 
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
     training_epoch = jax.pmap(training_epoch, axis_name="i")
-    buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, local_devices_to_use))
+    buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, num_devices))
     simulator_state = jax.pmap(env.init)(env.iter_scenario)
 
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)
-    prefill_keys = split(prefill_key, local_devices_to_use)
+    prefill_keys = split(prefill_key, num_devices)
+
+    print("shape check".center(50, "="))
+    print("buffer", buffer_state.data.shape)
+    print("simulator", simulator_state.shape)
+    print("prefill_keys", prefill_keys.shape)
 
     training_state, simulator_state, buffer_state, _ = prefill_replay_buffer(
         training_state,
@@ -313,7 +325,7 @@ def train(
 
     for i in range(num_epoch):
         epoch_key, local_key = split(local_key)
-        epoch_keys = split(epoch_key, local_devices_to_use)
+        epoch_keys = split(epoch_key, num_devices)
 
         t = perf_counter()
         (training_state, simulator_state, buffer_state, training_metrics) = training_epoch(
@@ -338,15 +350,14 @@ def train(
         current_step = int(unpmap(training_state.env_steps))
 
         # Eval and logging
-        if process_id == 0:
-            if checkpoint_logdir and not i % save_freq:
-                # Save current policy
-                params = training_state.actor_params
-                path = f"{checkpoint_logdir}/model_{current_step}.pkl"
-                save_params(path, params)
+        if checkpoint_logdir and not i % save_freq:
+            # Save current policy
+            params = training_state.actor_params
+            path = f"{checkpoint_logdir}/model_{current_step}.pkl"
+            save_params(path, params)
 
-            print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
-            progress_fn(current_step, training_metrics)
+        print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
+        progress_fn(current_step, training_metrics)
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
@@ -376,12 +387,6 @@ if __name__ == "__main__":
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
 
-    env = WaymaxBicycleEnv(
-        max_num_objects=_args.max_num_objects,
-        num_envs=_args.num_envs,
-        observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
-    )
-
     # Metrics progression of training
     writer = SummaryWriter(path_to_save_model)
     writer.add_text(
@@ -398,4 +403,4 @@ if __name__ == "__main__":
             print(f"{key}: {metrics[key]}")
         print()
 
-    train(environment=env, args=_args, progress_fn=progress, checkpoint_logdir=path_to_save_model)
+    train(args=_args, progress_fn=progress, checkpoint_logdir=path_to_save_model)

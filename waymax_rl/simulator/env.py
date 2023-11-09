@@ -42,7 +42,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         dynamics_model: dynamics.DynamicsModel,
         env_config: config.EnvironmentConfig,
         max_num_objects: int = 64,
-        num_envs: int = 1,
+        batch_dims: tuple = (),
         observation_fn: callable = None,
         reward_fn: callable = None,
         eval_mode: bool = False,
@@ -51,7 +51,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         super().__init__(dynamics_model, env_config)
 
         self._max_num_objects = max_num_objects
-        self._num_envs = num_envs
+        self._batch_dims = batch_dims
         self._eval_mode = eval_mode
 
         if eval_mode:
@@ -66,26 +66,14 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
                 dataclasses.replace(
                     config.WOD_1_1_0_TRAINING,
                     max_num_objects=max_num_objects,
-                    batch_dims=(num_envs,),
-                    distributed=True,
+                    batch_dims=batch_dims,
                 ),
             )
-
-            self._inter_scenarios = dataloader.simulator_state_generator(
-                dataclasses.replace(
-                    config.WOD_1_1_0_TRAINING,
-                    max_num_objects=max_num_objects,
-                    batch_dims=(num_envs,),
-                ),
-            )
-
-
 
         if observation_fn is not None:
             self.observe = observation_fn
         if reward_fn is not None:
             self.reward = reward_fn
-
 
     def observation_spec(self):
         observation = self.observe(self.iter_scenario)
@@ -97,8 +85,8 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._max_num_objects
 
     @property
-    def num_envs(self):
-        return self._num_envs
+    def batch_dims(self):
+        return self._batch_dims
 
     @property
     def iter_scenario(self) -> SimulatorState:
@@ -108,7 +96,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return super().reset(state)
 
     def reset(self) -> EpisodeSlice:
-        scenario = next(self._inter_scenarios)
+        scenario = next(self._scenarios)
         return self.init(scenario)
 
     def metrics(self, state: SimulatorState):
@@ -123,7 +111,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
     def __init__(
         self,
         max_num_objects: int = 64,
-        num_envs: int = 1,
+        batch_dims: int = 1,
         observation_fn: callable = None,
         reward_fn: callable = None,
         normalize_actions: bool = True,
@@ -140,7 +128,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             ),
         )
 
-        super().__init__(dynamics_model, env_config, max_num_objects, num_envs, observation_fn, reward_fn, eval_mode)
+        super().__init__(dynamics_model, env_config, max_num_objects, batch_dims, observation_fn, reward_fn, eval_mode)
 
     def step(self, state: SimulatorState, action: jax.Array) -> EpisodeSlice:
         # Validate and wrap the action
@@ -162,11 +150,11 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         # Collect metrics if any
         metric_dict = self.metrics(state)
 
-        next_state = jax.lax.cond(
-            jnp.all(truncation),
-            lambda: self.reset(),
-            lambda: next_state,
-        )
+        # next_state = jax.lax.cond(
+        #     jnp.all(truncation),
+        #     lambda: self.reset(),
+        #     lambda: next_state,
+        # )
 
         return EpisodeSlice(
             state=next_state,

@@ -39,7 +39,7 @@ class TrainingState:
 
 def init_training_state(
     key: PRNGKey,
-    local_devices_to_use: int,
+    num_devices: int,
     neural_network,
     actor_optimizer: optax.GradientTransformation,
     critic_optimizer: optax.GradientTransformation,
@@ -62,7 +62,7 @@ def init_training_state(
         env_steps=jnp.zeros(()),
     )
 
-    return jax.device_put_replicated(training_state, jax.local_devices()[:local_devices_to_use])
+    return jax.device_put_replicated(training_state, jax.local_devices()[:num_devices])
 
 
 def load_params(path: str) -> Any:
@@ -125,26 +125,6 @@ def assert_is_replicated(x: Any, debug: Any = None):
 
 def unpmap(v):
     return jax.tree_util.tree_map(lambda x: x[0], v)
-
-
-def handle_devices(max_devices_per_host):
-    process_id = jax.process_index()
-    local_devices_to_use = jax.local_device_count()
-
-    if max_devices_per_host is not None:
-        local_devices_to_use = min(local_devices_to_use, max_devices_per_host)
-
-    device_count = local_devices_to_use * jax.process_count()
-
-    print("device".center(50, "="))
-    print(f"process_id: {process_id}")
-    print(f"local_devices_to_use: {local_devices_to_use}")
-    print(f"device_count: {device_count}")
-    print(f"jax.process_count(): {jax.process_count()}")
-    print(f"jax.default_backend(): {jax.default_backend()}")
-    print(f"jax.local_devices(): {jax.local_devices()}")
-
-    return process_id, local_devices_to_use, device_count
 
 
 # Args save & load

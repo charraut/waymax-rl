@@ -48,7 +48,6 @@ class UniformSamplingQueue(ReplayBuffer):
 
     def __init__(
         self,
-        num_envs: int,
         buffer_size: int,
         batch_size: int,
         dummy_data_sample: Transition,
@@ -58,12 +57,12 @@ class UniformSamplingQueue(ReplayBuffer):
         self._unflatten_fn = jax.vmap(self._unflatten_fn)
         data_size = len(dummy_flatten)
 
-        _buffer_size = int(buffer_size + buffer_size % num_envs)
+        # _buffer_size = int(buffer_size + buffer_size % num_envs)
 
-        self._data_shape = (_buffer_size, data_size)
+        self._data_shape = (buffer_size, data_size)
         self._data_dtype = dummy_flatten.dtype
         self._batch_size = batch_size
-        self._size = _buffer_size
+        self._size = buffer_size
 
     def init(self, key: PRNGKey) -> ReplayBufferState:
         return ReplayBufferState(
