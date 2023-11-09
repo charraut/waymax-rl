@@ -92,7 +92,7 @@ def train(
     # Observation & action spaces dimensions
     obs_size = env.observation_spec()
     action_size = env.action_spec().data.shape[0]
-    action_shape = (args.num_envs, action_size)
+    action_shape = (args.num_envs // num_devices, action_size)
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
 
