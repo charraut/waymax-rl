@@ -42,14 +42,14 @@ def parse_args():
     parser.add_argument("--num_save", type=int, default=20)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
-    # SAC
+    # SAC256
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
     parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256, 256))
     # Replay Buffer
     parser.add_argument("--buffer_size", type=int, default=1_000_000)
     parser.add_argument("--learning_start", type=int, default=10000)
