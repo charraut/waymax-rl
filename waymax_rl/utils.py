@@ -19,7 +19,7 @@ class Transition(NamedTuple):
     observation: jnp.ndarray
     action: jnp.ndarray
     reward: jnp.ndarray
-    discount: jnp.ndarray
+    flag: jnp.ndarray
     next_observation: jnp.ndarray
 
 

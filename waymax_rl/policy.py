@@ -15,7 +15,7 @@ def policy_step(env, simulator_state, policy, key: PRNGKey):
         observation=obs,
         action=actions,
         reward=episode_slice.reward,
-        discount=episode_slice.discount,
+        flag=episode_slice.flag,
         next_observation=episode_slice.observation,
     )
     metrics = episode_slice.metrics
@@ -35,7 +35,7 @@ def random_step(env, simulator_state, action_shape, key: PRNGKey):
         observation=obs,
         action=actions,
         reward=episode_slice.reward,
-        discount=episode_slice.discount,
+        flag=episode_slice.flag,
         next_observation=episode_slice.observation,
     )
 

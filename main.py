@@ -1,4 +1,5 @@
 import argparse
+import os
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from functools import partial
@@ -33,28 +34,28 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=20_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--grad_updates_per_step", type=int, default=2)
-    parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--log_freq", type=int, default=500)
+    parser.add_argument("--grad_updates_per_step", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--log_freq", type=int, default=100)
     parser.add_argument("--num_save", type=int, default=20)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
     # SAC
-    parser.add_argument("--discount_factor", type=float, default=0.99)
-    parser.add_argument("--learning_rate", type=float, default=1e-5)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(512, 512, 256, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(512, 512, 256, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=100_000)
+    parser.add_argument("--buffer_size", type=int, default=1_000_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
-    parser.add_argument("--reward_scaling", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--debug", action="store_true", default=False)
 
     args = parser.parse_args()
 
@@ -83,7 +84,7 @@ def train(
     # Environment
     env = WaymaxBicycleEnv(
         max_num_objects=args.max_num_objects,
-        num_envs=args.num_envs,
+        batch_dims=batch_dims,
         observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
     )
 
@@ -126,7 +127,7 @@ def train(
             observation=jnp.zeros((obs_size,)),
             action=jnp.zeros((action_size,)),
             reward=0.0,
-            discount=0.0,
+            flag=0.0,
             next_observation=jnp.zeros((obs_size,)),
         ),
     )
@@ -135,8 +136,7 @@ def train(
     alpha = args.alpha
     critic_loss, actor_loss = make_losses(
         sac_network=sac_network,
-        reward_scaling=args.reward_scaling,
-        discount_factor=args.discount_factor,
+        gamma=args.gamma,
     )
 
     actor_update = gradient_update_fn(
@@ -337,17 +337,17 @@ def train(
         epoch_training_time = perf_counter() - t
 
         current_step = int(unpmap(training_state.env_steps))
-        sps = int((args.num_envs * num_training_steps_per_epoch) / epoch_training_time)
 
         training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)
+
+        epoch_training_time = perf_counter() - t
+        sps = int((args.num_envs * num_training_steps_per_epoch) / epoch_training_time)
 
         training_metrics = {
             "rollout/sps": sps,
             **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
         }
-
-        current_step = int(unpmap(training_state.env_steps))
 
         # Eval and logging
         if checkpoint_logdir and not i % save_freq:
@@ -377,6 +377,10 @@ def train(
 
 if __name__ == "__main__":
     _args = parse_args()
+
+    if _args.debug:
+        os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+        jax.config.update("jax_platform_name", "cpu")
 
     exp_name = "SAC"
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))

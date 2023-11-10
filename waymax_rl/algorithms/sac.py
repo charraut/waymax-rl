@@ -52,7 +52,7 @@ def make_sac_networks(
     )
 
 
-def make_losses(sac_network, reward_scaling: float, discount_factor: float):
+def make_losses(sac_network, gamma: float):
     """Creates the SAC losses."""
 
     actor_network = sac_network.actor_network
@@ -75,7 +75,7 @@ def make_losses(sac_network, reward_scaling: float, discount_factor: float):
         next_critic = critic_network.apply(target_critic_params, transitions.next_observation, next_action)
         next_v = jnp.min(next_critic, axis=-1) - alpha * next_log_prob
         target_critic = jax.lax.stop_gradient(
-            transitions.reward * reward_scaling + transitions.discount * discount_factor * next_v,
+            transitions.reward + transitions.flag * gamma * next_v,
         )
         critic_error = critic_old_action - jnp.expand_dims(target_critic, -1)
 

@@ -62,18 +62,20 @@ def obs_global(state: SimulatorState, num_steps: int = 10) -> jax.Array:
     roadgraph_static_points = observation.roadgraph_static_points.xy
 
     # Normalize the trajectory
-    mean = trajectory.mean(axis=(2, 3, 4), keepdims=True)
-    std = trajectory.std(axis=(2, 3, 4), keepdims=True) + 1e-6
-    trajectory = (trajectory - mean) / std
+    flat_trajectory = trajectory.reshape(-1, 2)
+    mean = jnp.mean(flat_trajectory, axis=0)
+    std = jnp.std(flat_trajectory, axis=0) + 1e-6
+    normalized_trajectory = (flat_trajectory - mean) / std
 
     # Normalize the roadgraph
-    mean = roadgraph_static_points.mean(axis=(2, 3), keepdims=True)
-    std = roadgraph_static_points.std(axis=(2, 3), keepdims=True) + 1e-6
-    roadgraph_static_points = (roadgraph_static_points - mean) / std
+    flat_roadgraph = roadgraph_static_points.reshape(-1, 2)
+    mean = jnp.mean(flat_roadgraph, axis=0)
+    std = jnp.std(flat_roadgraph, axis=0) + 1e-6
+    normalized_roadgraph = (flat_roadgraph - mean) / std
 
     # Reshape
-    trajectory = jnp.reshape(trajectory, (*batch_dims, -1))
-    roadgraph_static_points = jnp.reshape(roadgraph_static_points, (*batch_dims, -1))
+    trajectory = jnp.reshape(normalized_trajectory, (*batch_dims, -1))
+    roadgraph_static_points = jnp.reshape(normalized_roadgraph, (*batch_dims, -1))
     sdc_pos = jnp.reshape(sdc_pos, (*batch_dims, -1))
     sdc_yaw = jnp.reshape(sdc_yaw, (*batch_dims, -1))
 

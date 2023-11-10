@@ -23,7 +23,7 @@ class EpisodeSlice:
       reward: The reward obtained in the current transition of shape (...,
         num_objects).
       done: A boolean array denoting the end of an episode of shape (...).
-      discount: An array of discount values of shape (...).
+      flag: An array of flag values of shape (...).
       metrics: Optional dictionary of metrics.
       info: Optional dictionary of arbitrary logging information.
     """
@@ -32,7 +32,7 @@ class EpisodeSlice:
     observation: jax.Array
     reward: jax.Array
     done: jax.Array
-    discount: jax.Array
+    flag: jax.Array
     metrics: Metrics = struct.field(default_factory=dict)
     info: dict[str, Any] = struct.field(default_factory=dict)
 
@@ -43,7 +43,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         dynamics_model: dynamics.DynamicsModel,
         env_config: config.EnvironmentConfig,
         max_num_objects: int = 64,
-        num_envs: int = 1,
+        batch_dims: tuple = (),
         observation_fn: callable = None,
         reward_fn: callable = None,
         eval_mode: bool = False,
@@ -52,23 +52,22 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         super().__init__(dynamics_model, env_config)
 
         self._max_num_objects = max_num_objects
-        self._num_envs = num_envs
+        self._batch_dims = batch_dims
         self._eval_mode = eval_mode
 
         if eval_mode:
-            self._scenarios = dataloader.simulator_state_generator(
+            self._dataset = dataloader.simulator_state_generator(
                 dataclasses.replace(
                     config.WOD_1_0_0_VALIDATION,
                     max_num_objects=max_num_objects,
                 ),
             )
         else:
-            self._scenarios = dataloader.simulator_state_generator(
+            self._dataset = dataloader.simulator_state_generator(
                 dataclasses.replace(
                     config.WOD_1_1_0_TRAINING,
                     max_num_objects=max_num_objects,
-                    batch_dims=(num_envs,),
-                    distributed=True,
+                    batch_dims=batch_dims,
                 ),
             )
 
@@ -76,8 +75,6 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             self.observe = observation_fn
         if reward_fn is not None:
             self.reward = reward_fn
-
-        self.reset = self._reset_eval if eval_mode else self._reset_train
 
     def observation_spec(self):
         observation = self.observe(self.iter_scenario)
@@ -89,21 +86,23 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._max_num_objects
 
     @property
-    def num_envs(self):
-        return self._num_envs
+    def batch_dims(self):
+        return self._batch_dims
 
     @property
     def iter_scenario(self) -> SimulatorState:
-        return next(self._scenarios)
+        return next(self._dataset)
 
     def init(self, state: SimulatorState) -> SimulatorState:
         return super().reset(state)
 
-    def _reset_train(self) -> SimulatorState:
-        return self.init(unpmap(self.iter_scenario))
+    def reset(self) -> SimulatorState:
+        state = self.iter_scenario
 
-    def _reset_eval(self) -> SimulatorState:
-        return self.init(self.iter_scenario)
+        if not self._eval_mode:
+            state = unpmap(state)
+
+        return super().reset(state)
 
     def termination(self, state: SimulatorState) -> jax.Array:
         metrics = super().metrics(state)
@@ -121,7 +120,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
     def __init__(
         self,
         max_num_objects: int = 64,
-        num_envs: int = 1,
+        batch_dims: tuple = (),
         observation_fn: callable = None,
         reward_fn: callable = None,
         normalize_actions: bool = True,
@@ -138,7 +137,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             ),
         )
 
-        super().__init__(dynamics_model, env_config, max_num_objects, num_envs, observation_fn, reward_fn, eval_mode)
+        super().__init__(dynamics_model, env_config, max_num_objects, batch_dims, observation_fn, reward_fn, eval_mode)
 
     def step(self, state: SimulatorState, action: jax.Array) -> EpisodeSlice:
         # Validate and wrap the action
@@ -155,12 +154,13 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         truncation = self.truncation(next_state)
         done = jnp.logical_or(termination, truncation)
 
-        # Determine the discount factor
-        discount = jnp.logical_not(termination)
+        # Determine the flag factor
+        flag = jnp.logical_not(termination)
 
         # Collect metrics if any
         metric_dict = self.metrics(next_state)
 
+        # Auto-reset
         next_state = jax.lax.cond(
             jnp.all(done),
             lambda: self.reset(),
@@ -171,7 +171,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             state=next_state,
             reward=reward,
             observation=next_obs,
-            discount=discount,
+            flag=flag,
             done=done,
             metrics=metric_dict,
         )
