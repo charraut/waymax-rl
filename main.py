@@ -34,26 +34,25 @@ def parse_args():
 
     # Training
     parser.add_argument("--total_timesteps", type=int, default=5_000_000)
-    parser.add_argument("--num_envs", type=int, default=4)
-    parser.add_argument("--grad_updates_per_step", type=int, default=4)
+    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--grad_updates_per_step", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--log_freq", type=int, default=500)
-    parser.add_argument("--num_save", type=int, default=1)
+    parser.add_argument("--num_save", type=int, default=20)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
     # SAC
     parser.add_argument("--discount_factor", type=float, default=0.99)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(512, 512, 256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(512, 512, 256, 256))
     # Replay Buffer
     parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
-    parser.add_argument("--action_repeat", type=int, default=1)
     parser.add_argument("--reward_scaling", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
 
@@ -70,20 +69,21 @@ def train(
     start_train_func = perf_counter()
 
     # Devices handling
-    num_devices = min(jax.local_device_count(), args.num_envs)
+    if args.num_envs > 1:
+        raise NotImplementedError("Multiple environments are not supported yet")
 
-    env_steps_per_actor_step = args.action_repeat * args.num_envs
+    num_devices = jax.local_device_count()
     num_prefill_actor_steps = args.learning_start // args.num_envs
     num_epoch = max(args.log_freq, 1)
-    num_training_steps_per_epoch = args.total_timesteps // (num_epoch * env_steps_per_actor_step)
+    num_training_steps_per_epoch = args.total_timesteps // (num_epoch + args.num_envs)
     save_freq = num_epoch // args.num_save
 
-    batch_dims = (num_devices, args.num_envs // num_devices)
+    batch_dims = (num_devices, args.num_envs)
 
     # Environment
     env = WaymaxBicycleEnv(
         max_num_objects=args.max_num_objects,
-        batch_dims=batch_dims,
+        num_envs=args.num_envs,
         observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
     )
 
@@ -92,7 +92,7 @@ def train(
     # Observation & action spaces dimensions
     obs_size = env.observation_spec()
     action_size = env.action_spec().data.shape[0]
-    action_shape = (args.num_envs // num_devices, action_size)
+    action_shape = (args.num_envs, action_size)
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
 
@@ -213,7 +213,7 @@ def train(
             buffer_state = replay_buffer.insert(buffer_state, transitions)
 
             new_training_state = training_state.replace(
-                env_steps=training_state.env_steps + env_steps_per_actor_step,
+                env_steps=training_state.env_steps,
             )
 
             return (new_training_state, simulator_state, buffer_state, new_key), ()
@@ -238,7 +238,7 @@ def train(
         buffer_state = replay_buffer.insert(buffer_state, transitions)
 
         training_state = training_state.replace(
-            env_steps=training_state.env_steps + env_steps_per_actor_step,
+            env_steps=training_state.env_steps + args.num_envs,
         )
 
         buffer_state, transitions = replay_buffer.sample(buffer_state)
@@ -337,7 +337,7 @@ def train(
         epoch_training_time = perf_counter() - t
 
         current_step = int(unpmap(training_state.env_steps))
-        sps = int((env_steps_per_actor_step * num_training_steps_per_epoch) / epoch_training_time)
+        sps = int((args.num_envs * num_training_steps_per_epoch) / epoch_training_time)
 
         training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)

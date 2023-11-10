@@ -21,7 +21,6 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     discount: jnp.ndarray
     next_observation: jnp.ndarray
-    extras: jnp.ndarray = ()
 
 
 @flax.struct.dataclass

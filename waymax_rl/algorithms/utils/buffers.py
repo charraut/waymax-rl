@@ -57,8 +57,6 @@ class UniformSamplingQueue(ReplayBuffer):
         self._unflatten_fn = jax.vmap(self._unflatten_fn)
         data_size = len(dummy_flatten)
 
-        # _buffer_size = int(buffer_size + buffer_size % num_envs)
-
         self._data_shape = (buffer_size, data_size)
         self._data_dtype = dummy_flatten.dtype
         self._batch_size = batch_size
