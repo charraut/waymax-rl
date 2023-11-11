@@ -13,6 +13,7 @@ from waymax_rl.utils import (
     save_args,
 )
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 def parse_args():
     parser = argparse.ArgumentParser()
