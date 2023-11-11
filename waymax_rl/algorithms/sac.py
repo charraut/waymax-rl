@@ -129,8 +129,8 @@ def train(
     rng, simulator_key = jax.random.split(rng)
 
     # Devices handling
-    # if args.num_envs > 1:
-    #     raise NotImplementedError("Multiple environments are not supported yet")
+    if args.num_envs > 1:
+        raise NotImplementedError("Multiple environments are not supported yet")
 
     num_devices = jax.local_device_count()
     num_prefill_actor_steps = args.learning_start // args.num_envs
@@ -181,6 +181,7 @@ def train(
             reward=0.0,
             flag=0.0,
             next_observation=jnp.zeros((obs_size,)),
+            done=0.0,
         ),
     )
 
