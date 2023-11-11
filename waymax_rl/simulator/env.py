@@ -10,7 +10,6 @@ from waymax.datatypes import Action, SimulatorState
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 
 from waymax_rl.types import Metrics
-from waymax_rl.utils import unpmap
 
 
 @chex.dataclass(frozen=True)
@@ -43,7 +42,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         dynamics_model: dynamics.DynamicsModel,
         env_config: config.EnvironmentConfig,
         max_num_objects: int = 64,
-        batch_dims: tuple = (),
+        num_envs: int = 1,
         observation_fn: callable = None,
         reward_fn: callable = None,
         eval_mode: bool = False,
@@ -52,24 +51,9 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         super().__init__(dynamics_model, env_config)
 
         self._max_num_objects = max_num_objects
-        self._batch_dims = batch_dims
+        self._num_envs = num_envs
         self._eval_mode = eval_mode
-
-        if eval_mode:
-            self._dataset = dataloader.simulator_state_generator(
-                dataclasses.replace(
-                    config.WOD_1_0_0_VALIDATION,
-                    max_num_objects=max_num_objects,
-                ),
-            )
-        else:
-            self._dataset = dataloader.simulator_state_generator(
-                dataclasses.replace(
-                    config.WOD_1_1_0_TRAINING,
-                    max_num_objects=max_num_objects,
-                    batch_dims=batch_dims,
-                ),
-            )
+        self._dataset = None
 
         if observation_fn is not None:
             self.observe = observation_fn
@@ -86,23 +70,27 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         return self._max_num_objects
 
     @property
-    def batch_dims(self):
-        return self._batch_dims
+    def num_envs(self):
+        return self._num_envs
 
     @property
     def iter_scenario(self) -> SimulatorState:
         return next(self._dataset)
 
-    def init(self, state: SimulatorState) -> SimulatorState:
-        return super().reset(state)
+    def init(self, seed: int) -> SimulatorState:
+        self._dataset = dataloader.simulator_state_generator(
+            dataclasses.replace(
+                config.WOD_1_1_0_TRAINING,
+                max_num_objects=self._max_num_objects,
+                batch_dims=(self._num_envs,),
+                # shuffle_seed=seed,
+            ),
+        )
+
+        return self.reset()
 
     def reset(self) -> SimulatorState:
-        state = self.iter_scenario
-
-        if not self._eval_mode:
-            state = unpmap(state)
-
-        return super().reset(state)
+        return super().reset(self.iter_scenario)
 
     def termination(self, state: SimulatorState) -> jax.Array:
         metrics = super().metrics(state)
@@ -120,7 +108,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
     def __init__(
         self,
         max_num_objects: int = 64,
-        batch_dims: tuple = (),
+        num_envs: int = 1,
         observation_fn: callable = None,
         reward_fn: callable = None,
         normalize_actions: bool = True,
@@ -137,7 +125,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             ),
         )
 
-        super().__init__(dynamics_model, env_config, max_num_objects, batch_dims, observation_fn, reward_fn, eval_mode)
+        super().__init__(dynamics_model, env_config, max_num_objects, num_envs, observation_fn, reward_fn, eval_mode)
 
     def step(self, state: SimulatorState, action: jax.Array) -> EpisodeSlice:
         # Validate and wrap the action

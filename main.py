@@ -34,11 +34,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=20_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--log_freq", type=int, default=100)
+    parser.add_argument("--log_freq", type=int, default=1000)
     parser.add_argument("--num_save", type=int, default=20)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=5)
@@ -69,6 +69,9 @@ def train(
 ):
     start_train_func = perf_counter()
 
+    rng = PRNGKey(args.seed)
+    rng, simulator_key = split(rng)
+
     # Devices handling
     if args.num_envs > 1:
         raise NotImplementedError("Multiple environments are not supported yet")
@@ -79,16 +82,14 @@ def train(
     num_training_steps_per_epoch = args.total_timesteps // (num_epoch + args.num_envs)
     save_freq = num_epoch // args.num_save
 
-    batch_dims = (num_devices, args.num_envs)
-
     # Environment
     env = WaymaxBicycleEnv(
         max_num_objects=args.max_num_objects,
-        batch_dims=batch_dims,
+        num_envs=args.num_envs,
         observation_fn=partial(obs_global, num_steps=_args.trajectory_length),
     )
 
-    rng = PRNGKey(args.seed)
+    simulator_state = jax.pmap(env.init)(jnp.arange(num_devices))
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec()
@@ -98,7 +99,6 @@ def train(
     print(f"action size: {action_size}")
 
     print("device".center(50, "="))
-    print(f"batch_dims: {batch_dims}")
     print(f"num_devices: {num_devices}")
     print(f"jax.local_devices_to_use: {jax.local_device_count()}")
     print(f"jax.default_backend(): {jax.default_backend()}")
@@ -298,7 +298,6 @@ def train(
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
     training_epoch = jax.pmap(training_epoch, axis_name="i")
     buffer_state = jax.pmap(replay_buffer.init)(split(rb_key, num_devices))
-    simulator_state = jax.pmap(env.init)(env.iter_scenario)
 
     # Create and initialize the replay buffer
     prefill_key, local_key = split(local_key)
