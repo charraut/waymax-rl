@@ -1,6 +1,3 @@
-# Code source: https://github.com/google/brax/blob/main/brax/training/replay_buffers.py
-
-
 import math
 from collections.abc import Sequence
 

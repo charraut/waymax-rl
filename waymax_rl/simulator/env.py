@@ -17,12 +17,11 @@ class EpisodeSlice:
     """Container class for Waymax transitions.
 
     Attributes:
-      state: The current simulation state of shape (...).
-      observation: The current observation of shape (..,).
-      reward: The reward obtained in the current transition of shape (...,
-        num_objects).
-      done: A boolean array denoting the end of an episode of shape (...).
-      flag: An array of flag values of shape (...).
+      state: The current simulation state of shape (num_envs,).
+      observation: The current observation of shape (num_envs, ...).
+      reward: The reward obtained in the current transition of shape (num_envs,).
+      done: A boolean array denoting the end of an episode of shape (num_envs,).
+      flag: An array of flag values of shape (num_envs,).
       metrics: Optional dictionary of metrics.
       info: Optional dictionary of arbitrary logging information.
     """
@@ -41,19 +40,24 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         self,
         dynamics_model: dynamics.DynamicsModel,
         env_config: config.EnvironmentConfig,
+        dataset_config: config.DatasetConfig,
         max_num_objects: int = 64,
         num_envs: int = 1,
         observation_fn: callable = None,
         reward_fn: callable = None,
-        eval_mode: bool = False,
-        seed: int = 0,
     ) -> None:
+        """Initializes the Waymax environment."""
+
         super().__init__(dynamics_model, env_config)
 
         self._max_num_objects = max_num_objects
         self._num_envs = num_envs
-        self._eval_mode = eval_mode
-        self._dataset = None
+        self._data_generator = None
+        self._dataset_config = dataclasses.replace(
+            dataset_config,
+            max_num_objects=self._max_num_objects,
+            batch_dims=(self._num_envs,),
+        )
 
         if observation_fn is not None:
             self.observe = observation_fn
@@ -75,29 +79,31 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
 
     @property
     def iter_scenario(self) -> SimulatorState:
-        return next(self._dataset)
+        return next(self._data_generator)
 
     def init(self, seed: int) -> SimulatorState:
-        self._dataset = dataloader.simulator_state_generator(
-            dataclasses.replace(
-                config.WOD_1_1_0_TRAINING,
-                max_num_objects=self._max_num_objects,
-                batch_dims=(self._num_envs,),
-                # shuffle_seed=seed,
-            ),
-        )
+        """Initializes the data generator."""
+
+        # TODO: Add seed
+        self._data_generator = dataloader.simulator_state_generator(self._dataset_config)
 
         return self.reset()
 
     def reset(self) -> SimulatorState:
+        """Resets the environment."""
+
         return super().reset(self.iter_scenario)
 
     def termination(self, state: SimulatorState) -> jax.Array:
+        """Returns a boolean array denoting the end of an episode."""
+
         metrics = super().metrics(state)
         return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
 
-    def metrics(self, state: SimulatorState):
+    def metrics(self, state: SimulatorState) -> dict[str, jax.Array]:
+        """Returns a dictionary of metrics."""
         metric_dict = super().metrics(state)
+
         for key, metric in metric_dict.items():
             metric_dict[key] = jnp.mean(metric.value)
 
@@ -112,22 +118,34 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         observation_fn: callable = None,
         reward_fn: callable = None,
         normalize_actions: bool = True,
-        eval_mode: bool = False,
     ) -> None:
+        """Initializes the Waymax bibycle environment."""
+
         dynamics_model = dynamics.InvertibleBicycleModel(normalize_actions=normalize_actions)
         env_config = config.EnvironmentConfig(
             max_num_objects=max_num_objects,
             rewards=config.LinearCombinationRewardConfig(
                 rewards={
-                    "overlap": -20.0,
+                    "overlap": -50.0,
                     "offroad": -20.0,
                 },
             ),
         )
+        dataset_config = config.WOD_1_0_0_TRAINING
 
-        super().__init__(dynamics_model, env_config, max_num_objects, num_envs, observation_fn, reward_fn, eval_mode)
+        super().__init__(
+            dynamics_model,
+            env_config,
+            dataset_config,
+            max_num_objects,
+            num_envs,
+            observation_fn,
+            reward_fn,
+        )
 
     def step(self, state: SimulatorState, action: jax.Array) -> EpisodeSlice:
+        """Take a step in the environment."""
+
         # Validate and wrap the action
         _action = Action(data=action, valid=jnp.ones_like(action[..., 0:1], dtype=jnp.bool_))
         _action.validate()

@@ -108,7 +108,7 @@ def make_inference_fn(actor_critic_net):
     """Creates params and inference function."""
 
     def make_policy(params: Params, deterministic: bool = False) -> Policy:
-        def policy(observations: jax.Array, key_sample: PRNGKey) -> jax.Array:
+        def policy(observations: jax.Array, key_sample: PRNGKey = None) -> jax.Array:
             logits = actor_critic_net.actor_network.apply(params, observations)
 
             if deterministic:
