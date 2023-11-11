@@ -21,6 +21,7 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     flag: jnp.ndarray
     next_observation: jnp.ndarray
+    done: jnp.ndarray
 
 
 @flax.struct.dataclass

@@ -15,7 +15,7 @@ def policy_step(
     env: "WaymaxBaseEnv",
     simulator_state: "SimulatorState",
     policy: callable,
-    key: jax.random.PRNGKey,
+    key: jax.random.PRNGKey = None,
 ) -> tuple:
     """
     Execute a step in the environment using a given policy.
@@ -47,6 +47,7 @@ def policy_step(
         reward=episode_slice.reward,
         flag=episode_slice.flag,
         next_observation=episode_slice.observation,
+        done=episode_slice.done,
     )
 
     # Extract additional metrics from the episode slice
@@ -89,6 +90,7 @@ def random_step(
         reward=episode_slice.reward,
         flag=episode_slice.flag,
         next_observation=episode_slice.observation,
+        done=episode_slice.done,
     )
 
     return state, transition
