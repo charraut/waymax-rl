@@ -136,9 +136,10 @@ def train(
         raise NotImplementedError("Multiple environments are not supported yet")
 
     num_devices = jax.local_device_count()
-    num_prefill_actor_steps = args.learning_start // args.num_envs
+
     num_epoch = max(args.log_freq, 1)
-    num_training_steps_per_epoch = args.total_timesteps // (num_epoch + args.num_envs)
+    num_prefill_actor_steps = args.learning_start // args.num_envs
+    num_training_steps_per_epoch = args.total_timesteps // num_epoch
     save_freq = num_epoch // args.num_save
 
     # Environment
@@ -256,27 +257,22 @@ def train(
         return (new_training_state, key), metrics
 
     def prefill_replay_buffer(
-        training_state: TrainingState,
         simulator_state,
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
     ):
         def f(carry, unused_t):
-            training_state, simulator_state, buffer_state, key = carry
+            simulator_state, buffer_state, key = carry
             key, new_key = jax.random.split(key)
 
             simulator_state, transitions = random_step(env, simulator_state, action_shape, key)
             buffer_state = replay_buffer.insert(buffer_state, transitions)
 
-            new_training_state = training_state.replace(
-                env_steps=training_state.env_steps,
-            )
-
-            return (new_training_state, simulator_state, buffer_state, new_key), ()
+            return (simulator_state, buffer_state, new_key), ()
 
         return jax.lax.scan(
             f,
-            (training_state, simulator_state, buffer_state, key),
+            (simulator_state, buffer_state, key),
             (),
             length=num_prefill_actor_steps,
         )[0]
@@ -364,8 +360,7 @@ def train(
     print("simulator", simulator_state.shape)
     print("prefill_keys", prefill_keys.shape)
 
-    training_state, simulator_state, buffer_state, _ = prefill_replay_buffer(
-        training_state,
+    simulator_state, buffer_state, _ = prefill_replay_buffer(
         simulator_state,
         buffer_state,
         prefill_keys,
@@ -407,7 +402,7 @@ def train(
         # Eval and logging
         if checkpoint_logdir and not i % save_freq:
             # Save current policy
-            params = training_state.actor_params
+            params = unpmap(training_state.actor_params)
             path = f"{checkpoint_logdir}/model_{current_step}.pkl"
             save_params(path, params)
 
@@ -417,7 +412,7 @@ def train(
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
 
-    params = training_state.actor_params
+    params = unpmap(training_state.actor_params)
 
     if checkpoint_logdir:
         path = f"{checkpoint_logdir}/model_final.pkl"

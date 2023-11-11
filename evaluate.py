@@ -1,7 +1,6 @@
 import os
 from random import randint
 
-import jax
 import mediapy
 from jax.random import PRNGKey, split
 from waymax.visualization import plot_simulator_state
@@ -18,7 +17,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
-def load_model(env, args, path_to_model):
+def load_model(env, args, model_path):
     obs_size = env.observation_spec()
     action_size = env.action_spec().data.shape[0]
 
@@ -31,8 +30,7 @@ def load_model(env, args, path_to_model):
 
     make_policy = make_inference_fn(sac_network)
 
-    params = load_params(path_to_model)
-    params = jax.tree_map(lambda x: x[0], params)
+    params = load_params(model_path)
 
     action_shape = (action_size,)
     policy = make_policy(params, deterministic=True)
@@ -47,14 +45,14 @@ def random_state(env):
     return sim_state
 
 
-def eval_policy(env, args, path_to_model, run_path, nb_episodes=5, render=False):
+def eval_policy(env, args, model_path, run_path, nb_episodes=5, render=False):
     rng = PRNGKey(args.seed)
     rng, key = split(rng)
 
     sim_state = env.init(seed=randint(0, 1000))
 
-    if path_to_model:
-        policy, action_shape = load_model(env, args, path_to_model)
+    if model_path:
+        policy, action_shape = load_model(env, args, model_path)
         infer_model = True
     else:
         policy = None
@@ -100,11 +98,11 @@ def write_video(path, episode_images, idx):
     mediapy.write_video(video_path + "eval_" + str(idx) + ".mp4", episode_images, fps=10)
 
 
-def get_model_path(path_to_model, model_name: str = ""):
+def get_model_path(model_path, model_name: str = ""):
     # If no model name is provided, use the last .pkl model
     if model_name == "":
         # Filter to get only files with .pkl extension
-        pkl_files = [f for f in os.listdir(path_to_model) if f.endswith(".pkl")]
+        pkl_files = [f for f in os.listdir(model_path) if f.endswith(".pkl")]
 
         if pkl_files:
             # model_name is the last file with .pkl extension
@@ -112,14 +110,14 @@ def get_model_path(path_to_model, model_name: str = ""):
             print("Model name: ", model_name)
         else:
             print("No .pkl files found in the directory")
-            model_name = None
+            return None
 
-    return path_to_model + model_name
+    return model_path + model_name
 
 
 if __name__ == "__main__":
     # Load args from the training
-    run_name = "SAC_11-11_11:48:58"
+    run_name = "SAC_11-11_20:15:57"
     run_path = "runs/" + run_name + "/"
 
     model_path = get_model_path(run_path)
