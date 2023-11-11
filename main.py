@@ -8,12 +8,13 @@ import jax
 from tensorboardX import SummaryWriter
 
 from waymax_rl.algorithms.sac import train
+from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.simulator import create_bicycle_env
-from waymax_rl.utils import (
-    save_args,
-)
+from waymax_rl.utils import save_args
+
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -39,6 +40,7 @@ def parse_args():
     parser.add_argument("--buffer_size", type=int, default=1_000_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
+    parser.add_argument("--path_dataset", type=str, default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--debug_tpu", action="store_true", default=False)
@@ -114,7 +116,11 @@ if __name__ == "__main__":
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
 
+    if _args.path_dataset is None:
+        _args.path_dataset = WOD_1_0_0_TRAINING_BUCKET
+
     env = create_bicycle_env(
+        path_dataset=_args.path_dataset,
         max_num_objects=_args.max_num_objects,
         num_envs=_args.num_envs,
         trajectory_length=_args.trajectory_length,

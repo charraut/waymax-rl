@@ -18,8 +18,11 @@ from waymax_rl.algorithms.utils.networks import (
 )
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBaseEnv
-from waymax_rl.types import ActivationFn, Metrics, Params, PRNGKey
 from waymax_rl.utils import (
+    ActivationFn,
+    Metrics,
+    Params,
+    PRNGKey,
     TrainingState,
     Transition,
     assert_is_replicated,

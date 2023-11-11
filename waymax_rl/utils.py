@@ -2,7 +2,8 @@ import functools
 import json
 import pickle
 from argparse import ArgumentParser
-from typing import Any, NamedTuple
+from collections.abc import Callable, Mapping
+from typing import Any, NamedTuple, TypeVar
 
 import flax
 import jax
@@ -10,7 +11,16 @@ import jax.numpy as jnp
 import optax
 from etils import epath
 
-from waymax_rl.types import Params, PRNGKey
+
+Params = Any
+PRNGKey = jnp.ndarray
+Metrics = Mapping[str, jnp.ndarray]
+NetworkType = TypeVar("NetworkType")
+ReplayBufferState = Any
+ActivationFn = Callable[[jnp.ndarray], jnp.ndarray]
+Initializer = Callable[..., Any]
+State = TypeVar("State")
+Sample = TypeVar("Sample")
 
 
 class Transition(NamedTuple):

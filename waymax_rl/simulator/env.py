@@ -1,15 +1,16 @@
-import dataclasses
 from typing import Any
 
 import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
-from waymax import config, dataloader, dynamics
+from waymax.config import DataFormat, DatasetConfig, EnvironmentConfig, LinearCombinationRewardConfig
+from waymax.dataloader import simulator_state_generator
 from waymax.datatypes import Action, SimulatorState
+from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 
-from waymax_rl.types import Metrics
+from waymax_rl.utils import Metrics
 
 
 @chex.dataclass(frozen=True)
@@ -38,9 +39,9 @@ class EpisodeSlice:
 class WaymaxBaseEnv(PlanningAgentEnvironment):
     def __init__(
         self,
-        dynamics_model: dynamics.DynamicsModel,
-        env_config: config.EnvironmentConfig,
-        dataset_config: config.DatasetConfig,
+        dynamics_model: DynamicsModel,
+        env_config: EnvironmentConfig,
+        path_dataset: str,
         max_num_objects: int = 64,
         num_envs: int = 1,
         observation_fn: callable = None,
@@ -53,8 +54,11 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         self._max_num_objects = max_num_objects
         self._num_envs = num_envs
         self._data_generator = None
-        self._dataset_config = dataclasses.replace(
-            dataset_config,
+
+        self._dataset_config = DatasetConfig(
+            path=path_dataset,
+            max_num_rg_points=20000,
+            data_format=DataFormat.TFRECORD,
             max_num_objects=self._max_num_objects,
             batch_dims=(self._num_envs,),
         )
@@ -85,7 +89,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         """Initializes the data generator."""
 
         # TODO: Add seed
-        self._data_generator = dataloader.simulator_state_generator(self._dataset_config)
+        self._data_generator = simulator_state_generator(self._dataset_config)
 
         return self.reset()
 
@@ -115,28 +119,28 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         self,
         max_num_objects: int = 64,
         num_envs: int = 1,
+        path_dataset: str | None = None,
         observation_fn: callable = None,
         reward_fn: callable = None,
         normalize_actions: bool = True,
     ) -> None:
         """Initializes the Waymax bibycle environment."""
 
-        dynamics_model = dynamics.InvertibleBicycleModel(normalize_actions=normalize_actions)
-        env_config = config.EnvironmentConfig(
+        dynamics_model = InvertibleBicycleModel(normalize_actions=normalize_actions)
+        env_config = EnvironmentConfig(
             max_num_objects=max_num_objects,
-            rewards=config.LinearCombinationRewardConfig(
+            rewards=LinearCombinationRewardConfig(
                 rewards={
                     "overlap": -50.0,
                     "offroad": -20.0,
                 },
             ),
         )
-        dataset_config = config.WOD_1_0_0_TRAINING
 
         super().__init__(
             dynamics_model,
             env_config,
-            dataset_config,
+            path_dataset,
             max_num_objects,
             num_envs,
             observation_fn,

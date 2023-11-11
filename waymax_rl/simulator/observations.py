@@ -10,6 +10,36 @@ def normalize_data_point(data_point: jax.Array) -> jax.Array:
     return (data_point - mean) / std
 
 
+def obs_global(state: SimulatorState, trajectory_length: int = 10, normalize: bool = True) -> jax.Array:
+    num_envs = state.batch_dims
+    observation = sdc_observation_from_state(
+        state,
+        obs_num_steps=trajectory_length,
+        roadgraph_top_k=50,
+    )  # (num_envs, 1, num_objects, num_steps, 2)
+    observation = jax.tree_map(lambda x: x[:, 0], observation)  # (num_envs, num_objects, num_steps, 2)
+
+    # Extract all the data from the observation
+    trajectory = observation.trajectory.xy  # (num_envs, num_objects, num_steps, 2)
+    roadgraph_static_points = observation.roadgraph_static_points.xy  # (num_envs, roadgraph_top_k, 2)
+    sdc_pos = observation.pose2d.original_xy  # (num_envs, 2)
+    sdc_yaw = observation.pose2d.original_yaw  # (num_envs, 1)
+
+    # Normalize the trajectory
+    if normalize:
+        sdc_pos = normalize_data_point(sdc_pos)
+        trajectory = normalize_data_point(trajectory)
+        roadgraph_static_points = normalize_data_point(roadgraph_static_points)
+
+    # Reshape
+    trajectory = jnp.reshape(trajectory, (*num_envs, -1))  # (num_envs, num_objects * num_steps * 2)
+    roadgraph_static_points = jnp.reshape(roadgraph_static_points, (*num_envs, -1))  # (num_envs, roadgraph_top_k * 2)
+    sdc_pos = jnp.reshape(sdc_pos, (*num_envs, -1))  # (num_envs, 2)
+    sdc_yaw = jnp.reshape(sdc_yaw, (*num_envs, -1))  # (num_envs, 1)
+
+    return jnp.concatenate([trajectory, roadgraph_static_points, sdc_pos, sdc_yaw], axis=len(num_envs))
+
+
 def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Array:
     batch_dims = state.batch_dims
     observation = sdc_observation_from_state(state, obs_num_steps=num_steps, roadgraph_top_k=50)
@@ -55,33 +85,3 @@ def obs_global_with_target(state: SimulatorState, num_steps: int = 10) -> jax.Ar
         [log_trajectory, trajectory, roadgraph_static_points, sdc_pos, sdc_yaw],
         axis=len(batch_dims),
     )
-
-
-def obs_global(state: SimulatorState, trajectory_length: int = 10, normalize: bool = True) -> jax.Array:
-    num_envs = state.batch_dims
-    observation = sdc_observation_from_state(
-        state,
-        obs_num_steps=trajectory_length,
-        roadgraph_top_k=50,
-    )  # (num_envs, 1, num_objects, num_steps, 2)
-    observation = jax.tree_map(lambda x: x[:, 0], observation)  # (num_envs, num_objects, num_steps, 2)
-
-    # Extract all the data from the observation
-    trajectory = observation.trajectory.xy  # (num_envs, num_objects, num_steps, 2)
-    roadgraph_static_points = observation.roadgraph_static_points.xy  # (num_envs, roadgraph_top_k, 2)
-    sdc_pos = observation.pose2d.original_xy  # (num_envs, 2)
-    sdc_yaw = observation.pose2d.original_yaw  # (num_envs, 1)
-
-    # Normalize the trajectory
-    if normalize:
-        sdc_pos = normalize_data_point(sdc_pos)
-        trajectory = normalize_data_point(trajectory)
-        roadgraph_static_points = normalize_data_point(roadgraph_static_points)
-
-    # Reshape
-    trajectory = jnp.reshape(trajectory, (*num_envs, -1))  # (num_envs, num_objects * num_steps * 2)
-    roadgraph_static_points = jnp.reshape(roadgraph_static_points, (*num_envs, -1))  # (num_envs, roadgraph_top_k * 2)
-    sdc_pos = jnp.reshape(sdc_pos, (*num_envs, -1))  # (num_envs, 2)
-    sdc_yaw = jnp.reshape(sdc_yaw, (*num_envs, -1))  # (num_envs, 1)
-
-    return jnp.concatenate([trajectory, roadgraph_static_points, sdc_pos, sdc_yaw], axis=len(num_envs))

@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import optax
 from flax import linen
 
-from waymax_rl.types import ActivationFn, Initializer, Params, PRNGKey
+from waymax_rl.utils import ActivationFn, Initializer, Params, PRNGKey
 
 
 class Policy(Protocol):

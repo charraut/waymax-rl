@@ -8,12 +8,15 @@ from waymax.visualization import plot_simulator_state
 
 from waymax_rl.algorithms.sac import make_sac_networks
 from waymax_rl.algorithms.utils.networks import make_inference_fn
+from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import load_args, load_params
 
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
 
 def load_model(env, args, path_to_model):
     obs_size = env.observation_spec()
@@ -115,7 +118,6 @@ def get_model_path(path_to_model, model_name: str = ""):
 
 
 if __name__ == "__main__":
-
     # Load args from the training
     run_name = "SAC_11-11_11:48:58"
     run_path = "runs/" + run_name + "/"
@@ -124,6 +126,7 @@ if __name__ == "__main__":
     args = load_args(run_path)
 
     env = create_bicycle_env(
+        path_dataset=WOD_1_0_0_TRAINING_BUCKET,
         max_num_objects=args.max_num_objects,
         trajectory_length=args.trajectory_length,
     )
