@@ -44,7 +44,6 @@ class TrainingState:
     critic_params: Params
     target_critic_params: Params
     gradient_steps: jnp.ndarray
-    env_steps: jnp.ndarray
 
 
 def init_training_state(
@@ -69,7 +68,6 @@ def init_training_state(
         critic_params=critic_params,
         target_critic_params=critic_params,
         gradient_steps=jnp.zeros(()),
-        env_steps=jnp.zeros(()),
     )
 
     return jax.device_put_replicated(training_state, jax.local_devices()[:num_devices])

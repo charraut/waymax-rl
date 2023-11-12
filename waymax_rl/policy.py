@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 import jax
+import jax.numpy as jnp
 
 from waymax_rl.utils import Transition
 
@@ -32,28 +33,25 @@ def policy_step(
     - metrics: Additional metrics or information returned by the environment after the step.
     """
     # Obtain the current observation from the environment
-    obs = env.observe(simulator_state)
+    observation = env.observe(simulator_state)
 
     # Determine actions based on the given policy and observation
-    actions = policy(obs, key)
+    actions = policy(observation, key)
 
     # Apply the actions to the environment and get the resulting slice of the episode
     episode_slice = env.step(simulator_state, actions)
 
     # Create a transition object to encapsulate the step information
     transition = Transition(
-        observation=obs,
+        observation=observation,
         action=actions,
         reward=episode_slice.reward,
         flag=episode_slice.flag,
-        next_observation=episode_slice.observation,
+        next_observation=episode_slice.next_observation,
         done=episode_slice.done,
     )
 
-    # Extract additional metrics from the episode slice
-    metrics = episode_slice.metrics
-
-    return episode_slice.state, transition, metrics
+    return episode_slice.next_state, transition
 
 
 def random_step(
@@ -77,20 +75,45 @@ def random_step(
     - state: The new state of the simulator after the step.
     - transition: A Transition object containing details of the step.
     """
-    obs = env.observe(simulator_state)
+    observation = env.observe(simulator_state)
 
     # Generating actions within the specified bounds
     actions = jax.random.uniform(key=key, shape=action_shape, minval=action_bounds[0], maxval=action_bounds[1])
     episode_slice = env.step(simulator_state, actions)
 
-    state = episode_slice.state
     transition = Transition(
-        observation=obs,
+        observation=observation,
         action=actions,
         reward=episode_slice.reward,
         flag=episode_slice.flag,
-        next_observation=episode_slice.observation,
+        next_observation=episode_slice.next_observation,
         done=episode_slice.done,
     )
 
-    return state, transition
+    return episode_slice.next_state, transition
+
+
+def rollout(key: jax.random.PRNGKey, env: "WaymaxBaseEnv", policy: callable) -> tuple:
+    """Collect trajectories until the environment terminates."""
+    sim_state = env.init(key)
+    init_sim_state, init_transition = policy_step(env, sim_state, policy)
+    init_metrics = env.metrics(init_sim_state)
+    init_carry = (init_sim_state, init_transition, init_metrics, 0)
+
+    pre_timestep = init_sim_state.timestep
+
+    def cond_fn(carry):
+        transition = carry[1]
+
+        return jnp.all(jnp.logical_not(transition.done))
+
+    def body_fn(carry):
+        sim_state = carry[0]
+        metrics = env.metrics(sim_state)
+        next_sim_state, next_transition = policy_step(env, sim_state, policy)
+
+        return next_sim_state, next_transition, metrics, sim_state.timestep
+
+    _, _, final_metrics, final_timestep = jax.lax.while_loop(cond_fn, body_fn, init_carry)
+
+    return final_metrics, final_timestep + pre_timestep

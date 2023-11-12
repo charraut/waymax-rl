@@ -10,8 +10,6 @@ from waymax.datatypes import Action, SimulatorState
 from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 
-from waymax_rl.utils import Metrics
-
 
 @chex.dataclass(frozen=True)
 class EpisodeSlice:
@@ -27,12 +25,11 @@ class EpisodeSlice:
       info: Optional dictionary of arbitrary logging information.
     """
 
-    state: SimulatorState
-    observation: jax.Array
     reward: jax.Array
     done: jax.Array
     flag: jax.Array
-    metrics: Metrics = struct.field(default_factory=dict)
+    next_state: SimulatorState
+    next_observation: jax.Array
     info: dict[str, Any] = struct.field(default_factory=dict)
 
 
@@ -85,23 +82,24 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
     def iter_scenario(self) -> SimulatorState:
         return next(self._data_generator)
 
-    def init(self, seed: int = 0) -> SimulatorState:
+    def init(self, key: jax.random.PRNGKey) -> SimulatorState:
         """Initializes the data generator."""
-
-        # TODO: Add seed
         self._data_generator = simulator_state_generator(self._dataset_config)
+        n_draw = jax.random.randint(key, (), 1, 5)
 
-        return self.reset()
+        return self.reset(n_draw)
 
-    def reset(self) -> SimulatorState:
+    def reset(self, n_draw: int = 1) -> SimulatorState:
         """Resets the environment."""
+        # scenario = jax.lax.scan(lambda: self.iter_scenario, self.iter_scenario, None, length=n_draw)[0]
+        # return super().reset(scenario)
 
         return super().reset(self.iter_scenario)
 
     def termination(self, state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""
-
         metrics = super().metrics(state)
+
         return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
 
     def metrics(self, state: SimulatorState) -> dict[str, jax.Array]:
@@ -133,7 +131,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
                 rewards={
                     "overlap": -2.0,
                     "offroad": -2.0,
-                    "log_divergence": -0.1,
                 },
             ),
         )
@@ -160,16 +157,13 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         next_obs = self.observe(next_state)
 
         # Calculate the reward and check for termination and truncation conditions
-        reward = self.reward(next_state, None)
+        reward = self.reward(state, _action)
         termination = self.termination(next_state)
         truncation = self.truncation(next_state)
         done = jnp.logical_or(termination, truncation)
 
         # Determine the flag factor
         flag = jnp.logical_not(termination)
-
-        # Collect metrics if any
-        metric_dict = self.metrics(next_state)
 
         # Auto-reset
         next_state = jax.lax.cond(
@@ -179,10 +173,9 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         )
 
         return EpisodeSlice(
-            state=next_state,
             reward=reward,
-            observation=next_obs,
             flag=flag,
             done=done,
-            metrics=metric_dict,
+            next_state=next_state,
+            next_observation=next_obs,
         )

@@ -13,7 +13,6 @@ from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
 
 
-
 def parse_args():
     parser = argparse.ArgumentParser()
 
