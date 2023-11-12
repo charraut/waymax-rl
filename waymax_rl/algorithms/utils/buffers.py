@@ -83,15 +83,18 @@ class UniformSamplingQueue(ReplayBuffer):
                 f"doesn't match the expected value ({self._data_shape})",
             )
 
-        update = self._flatten_fn(samples)
+        # Flatten the samples
+        new_samples = self._flatten_fn(samples)
+        samples_size = len(new_samples)
 
+        # Current buffer state
         data = buffer_state.data
         insert_idx = buffer_state.insert_position
 
         # Update the buffer and the control numbers
-        data = jax.lax.dynamic_update_slice_in_dim(data, update, insert_idx, axis=0)
-        insert_idx = (insert_idx + len(update)) % self._size
-        sample_idx = jnp.minimum(buffer_state.sample_position + len(update), self._size)
+        data = jax.lax.dynamic_update_slice_in_dim(data, new_samples, insert_idx, axis=0)
+        insert_idx = (insert_idx + samples_size) % self._size
+        sample_idx = jnp.minimum(buffer_state.sample_position + samples_size, self._size)
 
         return buffer_state.replace(
             data=data,
@@ -114,7 +117,7 @@ class UniformSamplingQueue(ReplayBuffer):
             maxval=buffer_state.sample_position,
         )
 
-        batch = jnp.take(buffer_state.data, idx, axis=0, mode="wrap")
+        batch = jnp.take(buffer_state.data, idx, axis=0, unique_indices=True)
 
         return buffer_state.replace(key=key), self._unflatten_fn(batch)
 

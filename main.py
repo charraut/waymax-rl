@@ -13,8 +13,6 @@ from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
 
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -37,7 +35,7 @@ def parse_args():
     parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256))
     parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=1_000_000)
+    parser.add_argument("--buffer_size", type=int, default=500_000)
     parser.add_argument("--learning_start", type=int, default=10000)
     # Misc
     parser.add_argument("--path_dataset", type=str, default=None)
@@ -63,7 +61,7 @@ def setup_debugging(args):
     args.buffer_size = 10_000
     args.learning_start = 100
     args.num_envs = 1
-    args.batch_size = 32
+    args.batch_size = 16
     args.max_num_objects = 8
     args.trajectory_length = 1
     args.grad_updates_per_step = 1

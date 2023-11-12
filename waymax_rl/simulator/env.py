@@ -85,7 +85,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
     def iter_scenario(self) -> SimulatorState:
         return next(self._data_generator)
 
-    def init(self, seed: int) -> SimulatorState:
+    def init(self, seed: int = 0) -> SimulatorState:
         """Initializes the data generator."""
 
         # TODO: Add seed
@@ -131,8 +131,9 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             max_num_objects=max_num_objects,
             rewards=LinearCombinationRewardConfig(
                 rewards={
-                    "overlap": -50.0,
-                    "offroad": -20.0,
+                    "overlap": -2.0,
+                    "offroad": -2.0,
+                    "log_divergence": -0.1,
                 },
             ),
         )

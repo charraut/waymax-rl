@@ -39,7 +39,7 @@ def load_model(env, args, model_path):
 
 
 def random_state(env):
-    for _ in range(randint(0, 10)):
+    for _ in range(randint(1, 10)):
         sim_state = env.reset()
 
     return sim_state
@@ -117,7 +117,7 @@ def get_model_path(model_path, model_name: str = ""):
 
 if __name__ == "__main__":
     # Load args from the training
-    run_name = "SAC_11-11_20:15:57"
+    run_name = "SAC_12-11_10:10:51"
     run_path = "runs/" + run_name + "/"
 
     model_path = get_model_path(run_path)
