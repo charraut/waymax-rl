@@ -30,6 +30,7 @@ class EpisodeSlice:
     flag: jax.Array
     next_state: SimulatorState
     next_observation: jax.Array
+    metrics: dict[str, Any] = struct.field(default_factory=dict)
     info: dict[str, Any] = struct.field(default_factory=dict)
 
 
@@ -87,7 +88,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         self._data_generator = simulator_state_generator(self._dataset_config)
         n_draw = jax.random.randint(key, (), 1, 5)
 
-        return self.reset(n_draw)
+        return self.reset(n_draw=n_draw)
 
     def reset(self, n_draw: int = 1) -> SimulatorState:
         """Resets the environment."""
@@ -165,10 +166,13 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         # Determine the flag factor
         flag = jnp.logical_not(termination)
 
+        metrics = self.metrics(next_state)
+
         return EpisodeSlice(
             reward=reward,
             flag=flag,
             done=done,
             next_state=next_state,
             next_observation=next_obs,
+            metrics=metrics,
         )

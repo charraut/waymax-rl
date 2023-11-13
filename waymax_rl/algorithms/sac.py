@@ -123,6 +123,7 @@ def make_losses(sac_network, gamma: float):
 
 def train(
     environment: WaymaxBaseEnv,
+    eval_environment: WaymaxBaseEnv,
     args,
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     checkpoint_logdir: str | None = None,
@@ -354,7 +355,7 @@ def train(
     print("simulator", simulator_state.shape)
     print("prefill_keys", prefill_keys.shape)
 
-    evaluator = Evaluator(eval_env=env, eval_policy_fn=make_policy)
+    evaluator = Evaluator(eval_env=eval_environment, eval_policy_fn=make_policy)
     # run_evaluation = jax.pmap(evaluator.run_evaluation)(training_state.actor_params)
 
     simulator_state, buffer_state, _ = prefill_replay_buffer(

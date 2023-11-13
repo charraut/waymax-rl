@@ -97,10 +97,9 @@ def rollout(key: jax.random.PRNGKey, env: "WaymaxBaseEnv", policy: callable) -> 
     """Collect trajectories until the environment terminates."""
     sim_state = env.init(key)
     init_sim_state, init_transition = policy_step(env, sim_state, policy)
-    init_metrics = env.metrics(init_sim_state)
     init_reward = init_transition.reward
 
-    init_carry = (init_sim_state, init_transition, init_metrics, 0, init_reward)
+    init_carry = (init_sim_state, init_transition, init_reward)
 
     def cond_fn(carry):
         transition = carry[1]
@@ -109,13 +108,16 @@ def rollout(key: jax.random.PRNGKey, env: "WaymaxBaseEnv", policy: callable) -> 
 
     def body_fn(carry):
         sim_state = carry[0]
-        previous_reward = carry[4]
-        metrics = env.metrics(sim_state)
+        previous_reward = carry[2]
+
         next_sim_state, next_transition = policy_step(env, sim_state, policy)
-        reward = previous_reward + next_transition.reward
+        sum_reward = previous_reward + next_transition.reward
 
-        return next_sim_state, next_transition, metrics, sim_state.timestep, reward
+        return next_sim_state, next_transition, sum_reward
 
-    _, _, final_metrics, final_timestep, final_reward = jax.lax.while_loop(cond_fn, body_fn, init_carry)
+    final_sim_state, _, final_reward = jax.lax.while_loop(cond_fn, body_fn, init_carry)
 
-    return final_metrics, final_reward, final_timestep
+    episode_length = final_sim_state.timestep
+    metrics = env.metrics(final_sim_state)
+
+    return metrics, final_reward, episode_length

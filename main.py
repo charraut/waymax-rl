@@ -8,8 +8,7 @@ import jax
 from tensorboardX import SummaryWriter
 
 from waymax_rl.algorithms.sac import train
-from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
-from waymax_rl.simulator import create_bicycle_env
+from waymax_rl.simulator import create_bicycle_env, create_bicycle_env_eval
 from waymax_rl.utils import save_args
 
 
@@ -17,12 +16,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--log_freq", type=int, default=1000)
-    parser.add_argument("--num_save", type=int, default=20)
+    parser.add_argument("--log_freq", type=int, default=10000)
+    parser.add_argument("--num_save", type=int, default=1)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=3)
     # SAC256
@@ -114,9 +113,6 @@ if __name__ == "__main__":
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
 
-    if _args.path_dataset is None:
-        _args.path_dataset = WOD_1_0_0_TRAINING_BUCKET
-
     env = create_bicycle_env(
         path_dataset=_args.path_dataset,
         max_num_objects=_args.max_num_objects,
@@ -124,4 +120,17 @@ if __name__ == "__main__":
         trajectory_length=_args.trajectory_length,
     )
 
-    train(environment=env, args=_args, progress_fn=progress, checkpoint_logdir=path_to_save_model)
+    eval_env = create_bicycle_env_eval(
+        path_dataset=_args.path_dataset,
+        max_num_objects=_args.max_num_objects,
+        num_envs=_args.num_envs,
+        trajectory_length=_args.trajectory_length,
+    )
+
+    train(
+        environment=env,
+        eval_environment=eval_env,
+        args=_args,
+        progress_fn=progress,
+        checkpoint_logdir=path_to_save_model,
+    )
