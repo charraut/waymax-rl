@@ -74,8 +74,8 @@ def print_metrics(num_steps, metrics, writer=None):
     Print metrics and optionally write to tensorboard.
     """
     for key, value in metrics.items():
-        if writer:
-            writer.add_scalar(key, value, num_steps)
+        # if writer:
+        #     writer.add_scalar(key, value, num_steps)
         print(f"{key}: {value}")
     print()
 

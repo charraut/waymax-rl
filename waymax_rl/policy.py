@@ -93,9 +93,8 @@ def random_step(
     return episode_slice.next_state, transition
 
 
-def rollout(key: jax.random.PRNGKey, env: "WaymaxBaseEnv", policy: callable) -> tuple:
+def rollout(sim_state: "SimulatorState", env: "WaymaxBaseEnv", policy: callable) -> tuple:
     """Collect trajectories until the environment terminates."""
-    sim_state = env.init(key)
     init_sim_state, init_transition = policy_step(env, sim_state, policy)
     init_reward = init_transition.reward
 

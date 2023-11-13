@@ -86,16 +86,23 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
     def init(self, key: jax.random.PRNGKey) -> SimulatorState:
         """Initializes the data generator."""
         self._data_generator = simulator_state_generator(self._dataset_config)
-        n_draw = jax.random.randint(key, (), 1, 5)
+        n_draw = jax.random.randint(key, (), 0, 10)
 
         return self.reset(n_draw=n_draw)
 
-    def reset(self, n_draw: int = 1) -> SimulatorState:
-        """Resets the environment."""
-        # scenario = jax.lax.scan(lambda: self.iter_scenario, self.iter_scenario, None, length=n_draw)[0]
-        # return super().reset(scenario)
+    def reset(self, n_draw: int = 0) -> SimulatorState:
+        """Resets the environment by randomly drawing n times a new scenario from the dataset."""
+        def cond_fn(carry):
+            return carry[1] < n_draw
 
-        return super().reset(self.iter_scenario)
+        def body_fn(carry):
+            scenario = self.iter_scenario
+
+            return scenario, carry[1] + 1
+
+        scenario = jax.lax.while_loop(cond_fn, body_fn, (self.iter_scenario, 0))[0]
+
+        return super().reset(scenario)
 
     def termination(self, state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""

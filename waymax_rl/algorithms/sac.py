@@ -347,7 +347,7 @@ def train(
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
     # Create and initialize the replay buffer
-    prefill_key, local_key = jax.random.split(local_key)
+    prefill_key, eval_key, local_key = jax.random.split(local_key, 3)
     prefill_keys = jax.random.split(prefill_key, num_devices)
 
     print("shape check".center(50, "="))
@@ -355,7 +355,7 @@ def train(
     print("simulator", simulator_state.shape)
     print("prefill_keys", prefill_keys.shape)
 
-    evaluator = Evaluator(eval_env=eval_environment, eval_policy_fn=make_policy)
+    evaluator = Evaluator(key=eval_key, eval_env=eval_environment, eval_policy_fn=make_policy)
     # run_evaluation = jax.pmap(evaluator.run_evaluation)(training_state.actor_params)
 
     simulator_state, buffer_state, _ = prefill_replay_buffer(
@@ -372,7 +372,7 @@ def train(
     time_training = perf_counter()
 
     for i in range(num_epoch):
-        epoch_key, eval_key, local_key = jax.random.split(local_key, 3)
+        epoch_key, local_key = jax.random.split(local_key)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
         # Training
@@ -391,7 +391,7 @@ def train(
 
         # Evaluation
         params = unpmap(training_state.actor_params)
-        evaluation_metrics = evaluator.run_evaluation(eval_key, params)
+        evaluation_metrics = evaluator.run_evaluation(params)
         # evaluation_metrics = run_evaluation(training_state.actor_params)
         # evaluation_metrics = jax.tree_util.tree_map(jnp.mean, evaluation_metrics)
         # jax.tree_util.tree_map(lambda x: x.block_until_ready(), evaluation_metrics)
