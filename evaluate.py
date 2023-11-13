@@ -1,5 +1,6 @@
 import os
 from random import randint
+from pathlib import Path
 
 import mediapy
 from jax.random import PRNGKey, split
@@ -115,13 +116,43 @@ def get_model_path(model_path, model_name: str = ""):
     return model_path + model_name
 
 
+def list_folders_in_directory(directory):
+    """List all folders in the given directory."""
+    return [item for item in os.listdir(directory) if Path(directory, item).is_dir()]
+
+def choose_folder(folders):
+    """Prompt the user to choose a folder from the list."""
+    for i, folder in enumerate(folders, start=1):
+        print(f"[{i}] {folder}")
+    
+    try:
+        choice = input(f"-> Enter the number of the folder you choose (default is {len(folders)}): ")
+        choice = int(choice) if choice else len(folders)
+        return folders[choice - 1]
+    except (ValueError, IndexError):
+        print("Using the last folder as default.")
+        return folders[-1]
+
+
+
 if __name__ == "__main__":
     # Load args from the training
-    run_name = "SAC_12-11_10:10:51"
-    run_path = "runs/" + run_name + "/"
+    run_path = "runs/"
 
-    model_path = get_model_path(run_path)
-    args = load_args(run_path)
+    folders = list_folders_in_directory(run_path)
+
+    if folders:
+        chosen_folder = choose_folder(folders)
+        chosen_folder_path = Path(run_path, chosen_folder)
+        print(f"You have selected: {chosen_folder_path}")
+        # Save the path in a variable
+        selected_folder_path = str(chosen_folder_path) + "/"
+    else:
+        print("No folders found in the directory.")
+        selected_folder_path = None
+
+    model_path = get_model_path(selected_folder_path)
+    args = load_args(selected_folder_path)
 
     env = create_bicycle_env(
         path_dataset=WOD_1_0_0_TRAINING_BUCKET,
@@ -129,4 +160,4 @@ if __name__ == "__main__":
         trajectory_length=args.trajectory_length,
     )
 
-    eval_policy(env, args, model_path, run_path, nb_episodes=10, render=True)
+    # eval_policy(env, args, model_path, run_path, nb_episodes=10, render=True)
