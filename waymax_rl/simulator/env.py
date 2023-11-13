@@ -157,7 +157,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         next_obs = self.observe(next_state)
 
         # Calculate the reward and check for termination and truncation conditions
-        reward = self.reward(state, _action)
+        reward = self.reward(state, _action) + 1.0
         termination = self.termination(next_state)
         truncation = self.truncation(next_state)
         done = jnp.logical_or(termination, truncation)

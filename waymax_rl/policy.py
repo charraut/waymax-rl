@@ -98,9 +98,9 @@ def rollout(key: jax.random.PRNGKey, env: "WaymaxBaseEnv", policy: callable) -> 
     sim_state = env.init(key)
     init_sim_state, init_transition = policy_step(env, sim_state, policy)
     init_metrics = env.metrics(init_sim_state)
-    init_carry = (init_sim_state, init_transition, init_metrics, 0)
+    init_reward = init_transition.reward
 
-    pre_timestep = init_sim_state.timestep
+    init_carry = (init_sim_state, init_transition, init_metrics, 0, init_reward)
 
     def cond_fn(carry):
         transition = carry[1]
@@ -109,11 +109,13 @@ def rollout(key: jax.random.PRNGKey, env: "WaymaxBaseEnv", policy: callable) -> 
 
     def body_fn(carry):
         sim_state = carry[0]
+        previous_reward = carry[4]
         metrics = env.metrics(sim_state)
         next_sim_state, next_transition = policy_step(env, sim_state, policy)
+        reward = previous_reward + next_transition.reward
 
-        return next_sim_state, next_transition, metrics, sim_state.timestep
+        return next_sim_state, next_transition, metrics, sim_state.timestep, reward
 
-    _, _, final_metrics, final_timestep = jax.lax.while_loop(cond_fn, body_fn, init_carry)
+    _, _, final_metrics, final_timestep, final_reward = jax.lax.while_loop(cond_fn, body_fn, init_carry)
 
-    return final_metrics, final_timestep + pre_timestep
+    return final_metrics, final_reward, final_timestep

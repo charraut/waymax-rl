@@ -1,6 +1,6 @@
 import os
-from random import randint
 from pathlib import Path
+from random import randint
 
 import mediapy
 from jax.random import PRNGKey, split
@@ -120,11 +120,12 @@ def list_folders_in_directory(directory):
     """List all folders in the given directory."""
     return [item for item in os.listdir(directory) if Path(directory, item).is_dir()]
 
+
 def choose_folder(folders):
     """Prompt the user to choose a folder from the list."""
     for i, folder in enumerate(folders, start=1):
         print(f"[{i}] {folder}")
-    
+
     try:
         choice = input(f"-> Enter the number of the folder you choose (default is {len(folders)}): ")
         choice = int(choice) if choice else len(folders)
@@ -134,9 +135,7 @@ def choose_folder(folders):
         return folders[-1]
 
 
-
 if __name__ == "__main__":
-    # Load args from the training
     run_path = "runs/"
 
     folders = list_folders_in_directory(run_path)
@@ -160,4 +159,4 @@ if __name__ == "__main__":
         trajectory_length=args.trajectory_length,
     )
 
-    # eval_policy(env, args, model_path, run_path, nb_episodes=10, render=True)
+    eval_policy(env, args, model_path, run_path, nb_episodes=10, render=True)

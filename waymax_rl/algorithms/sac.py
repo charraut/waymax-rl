@@ -1,5 +1,4 @@
 from collections.abc import Callable, Sequence
-from functools import partial
 from time import perf_counter
 
 import flax
@@ -355,7 +354,7 @@ def train(
     print("simulator", simulator_state.shape)
     print("prefill_keys", prefill_keys.shape)
 
-    evaluator = Evaluator(eval_env=env, eval_policy_fn=partial(make_policy, deterministic=True))
+    evaluator = Evaluator(eval_env=env, eval_policy_fn=make_policy)
     # run_evaluation = jax.pmap(evaluator.run_evaluation)(training_state.actor_params)
 
     simulator_state, buffer_state, _ = prefill_replay_buffer(
@@ -393,7 +392,7 @@ def train(
         params = unpmap(training_state.actor_params)
         evaluation_metrics = evaluator.run_evaluation(eval_key, params)
         # evaluation_metrics = run_evaluation(training_state.actor_params)
-        evaluation_metrics = jax.tree_util.tree_map(jnp.mean, evaluation_metrics)
+        # evaluation_metrics = jax.tree_util.tree_map(jnp.mean, evaluation_metrics)
         # jax.tree_util.tree_map(lambda x: x.block_until_ready(), evaluation_metrics)
 
         metrics = {
