@@ -3,6 +3,7 @@ from functools import partial
 
 from waymax_rl.simulator.env import WaymaxBicycleEnv
 from waymax_rl.simulator.observations import obs_global
+from waymax_rl.simulator.wrappers import AutoResetWrapper
 
 
 def create_bicycle_env(
@@ -15,10 +16,13 @@ def create_bicycle_env(
 ):
     obs_fn = partial(observation_fn, trajectory_length=trajectory_length)
 
-    return WaymaxBicycleEnv(
+    env = WaymaxBicycleEnv(
         path_dataset=path_dataset,
         max_num_objects=max_num_objects,
         num_envs=num_envs,
         observation_fn=obs_fn,
         reward_fn=reward_fn,
     )
+    env = AutoResetWrapper(env)
+
+    return env

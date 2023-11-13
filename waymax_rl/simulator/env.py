@@ -165,13 +165,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         # Determine the flag factor
         flag = jnp.logical_not(termination)
 
-        # Auto-reset
-        next_state = jax.lax.cond(
-            jnp.all(done),
-            lambda: self.reset(),
-            lambda: next_state,
-        )
-
         return EpisodeSlice(
             reward=reward,
             flag=flag,
