@@ -90,7 +90,7 @@ def random_step(
         done=episode_slice.done,
     )
 
-    return episode_slice.next_state, transition
+    return episode_slice.next_state, transition, episode_slice.info
 
 
 def rollout(sim_state: "SimulatorState", env: "WaymaxBaseEnv", policy: callable) -> tuple:

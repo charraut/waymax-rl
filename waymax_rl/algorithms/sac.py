@@ -8,7 +8,6 @@ import optax
 from flax import linen
 from waymax.config import DataFormat, DatasetConfig
 from waymax.dataloader import simulator_state_generator
-from waymax.datatypes.operations import update_by_mask
 
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
 from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
@@ -145,7 +144,10 @@ def train(
         max_num_rg_points=20000,
         data_format=DataFormat.TFRECORD,
         max_num_objects=args.max_num_objects,
-        batch_dims=(args.num_envs,),
+        batch_dims=(
+            1,
+            args.num_envs,
+        ),
         distributed=True,
         shuffle_seed=args.seed,
     )
@@ -155,8 +157,15 @@ def train(
     scenario_length = sample_simulator_state.remaining_timesteps
 
     num_prefill_actor_steps = args.learning_start // args.num_envs
-    n_episode = args.total_timesteps // scenario_length
-    save_freq = n_episode // args.num_save
+    num_epoch = args.total_timesteps // args.log_freq
+    num_episode_per_epoch = (args.total_timesteps // num_epoch) // scenario_length
+
+    print("num_prefill_actor_steps", num_prefill_actor_steps)
+    print("num_epoch", num_epoch)
+    print("num_episode_per_epoch", num_episode_per_epoch)
+    print("scenario_length", scenario_length)
+
+    save_freq = num_epoch // args.num_save
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec(sample_simulator_state)
@@ -299,9 +308,11 @@ def train(
         policy = make_policy(training_state.actor_params)
         next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
         mask = info["masked_envs"]
+        mask_size = info["mask_size"]
 
-        buffer_state = replay_buffer.insert(buffer_state, transition, mask)
+        buffer_state = replay_buffer.insert(buffer_state, transition, mask, mask_size)
 
+        # TODO: Temporary fix to avoid having to deal with the mask
         # Replace new state with old state for masked environments
         # next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
 
@@ -316,11 +327,11 @@ def train(
         return next_training_state, next_simulator_state, next_buffer_state, sgd_metrics
 
     def training_episode(
-        training_state: TrainingState,
+        carry: tuple[TrainingState, ReplayBufferState, jax.random.PRNGKey],
         simulator_state,
-        buffer_state: ReplayBufferState,
-        key: jax.random.PRNGKey,
     ):
+        training_state, buffer_state, key = carry
+
         def f(carry, unused_t):
             ts, ss, bs, k = carry
             k, new_key = jax.random.split(k)
@@ -328,9 +339,11 @@ def train(
 
             return (ts, ss, bs, new_key), sm
 
+        _simulator_state = env.reset(simulator_state)
+
         (training_state, simulator_state, buffer_state, key), sgd_metrics = jax.lax.scan(
             f,
-            (training_state, env.reset(simulator_state), buffer_state, key),
+            (training_state, _simulator_state, buffer_state, key),
             (),
             length=scenario_length,
         )
@@ -338,17 +351,24 @@ def train(
         metrics = {**{f"training/{name}": value for name, value in sgd_metrics.items()}}
         metrics = jax.tree_util.tree_map(jnp.mean, sgd_metrics)
 
-        return training_state, simulator_state, buffer_state, metrics
+        return (training_state, buffer_state, key), metrics
 
-    # def training_epoch(
-    #     training_state: TrainingState,
-    #     simulator_state,
-    #     buffer_state: ReplayBufferState,
-    #     key: jax.random.PRNGKey,
-    # ):
-    #     key, local_key = jax.random.split(key)
+    def training_epoch(
+        batch_simulator_state,
+        training_state: TrainingState,
+        buffer_state: ReplayBufferState,
+        key: jax.random.PRNGKey,
+    ):
+        key, local_key = jax.random.split(key)
 
-    #     result = jax
+        (training_state, buffer_state, _), metrics = jax.lax.scan(
+            training_episode,
+            (training_state, buffer_state, local_key),
+            batch_simulator_state,
+            length=num_episode_per_epoch,
+        )
+
+        return training_state, buffer_state, metrics
 
     global_key, local_key = jax.random.split(rng)
 
@@ -364,7 +384,7 @@ def train(
     local_key, rb_key = jax.random.split(local_key, 2)
 
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
-    training_episode = jax.pmap(training_episode, axis_name="i")
+    training_epoch = jax.pmap(training_epoch, axis_name="i")
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
     # Create and initialize the replay buffer
@@ -389,16 +409,16 @@ def train(
 
     time_training = perf_counter()
 
-    for i in range(n_episode):
+    for epoch in range(num_epoch):
         epoch_key, local_key = jax.random.split(local_key)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
-        simulator_state = next(data_generator)
+        batch_simulator_state = next(data_generator)
 
         t = perf_counter()
-        (training_state, simulator_state, buffer_state, training_metrics) = training_episode(
+        training_state, buffer_state, training_metrics = training_epoch(
+            batch_simulator_state,
             training_state,
-            simulator_state,
             buffer_state,
             epoch_keys,
         )
@@ -407,7 +427,7 @@ def train(
         training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)
 
-        current_step = i * scenario_length
+        current_step = epoch * scenario_length
         sps = int((args.num_envs * scenario_length) / epoch_training_time)
 
         metrics = {
@@ -418,7 +438,7 @@ def train(
         params = unpmap(training_state.actor_params)
 
         # Log metrics
-        if checkpoint_logdir and not i % save_freq:
+        if checkpoint_logdir and not epoch % save_freq:
             # Save current policy
             path = f"{checkpoint_logdir}/model_{current_step}.pkl"
             save_params(path, params)
