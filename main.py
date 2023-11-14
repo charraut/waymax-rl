@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument("--num_envs", type=int, default=4)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--log_freq", type=int, default=10000)
+    parser.add_argument("--num_episode_per_epoch", type=int, default=10)
     parser.add_argument("--num_save", type=int, default=1)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=3)
@@ -99,9 +99,6 @@ def setup_run(args):
 
 if __name__ == "__main__":
     _args = parse_args()
-
-    os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
-    jax.config.update("jax_platform_name", "cpu")
 
     if _args.debug or _args.debug_tpu:
         setup_debugging(_args)

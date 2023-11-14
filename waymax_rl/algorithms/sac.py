@@ -145,7 +145,7 @@ def train(
         data_format=DataFormat.TFRECORD,
         max_num_objects=args.max_num_objects,
         batch_dims=(
-            1,
+            args.num_episode_per_epoch,
             args.num_envs,
         ),
         distributed=True,
@@ -156,16 +156,13 @@ def train(
     sample_simulator_state = env.reset(next(data_generator))
     scenario_length = sample_simulator_state.remaining_timesteps
 
-    num_prefill_actor_steps = args.learning_start // args.num_envs
-    num_epoch = args.total_timesteps // args.log_freq
-    num_episode_per_epoch = (args.total_timesteps // num_epoch) // scenario_length
-
-    print("num_prefill_actor_steps", num_prefill_actor_steps)
-    print("num_epoch", num_epoch)
-    print("num_episode_per_epoch", num_episode_per_epoch)
-    print("scenario_length", scenario_length)
-
+    num_epoch = args.total_timesteps // args.num_episode_per_epoch
     save_freq = num_epoch // args.num_save
+
+    print("num_prefill_actor_steps", args.num_episode_per_epoch * scenario_length)
+    print("num_epoch", num_epoch)
+    print("num_episode_per_epoch", args.num_episode_per_epoch)
+    print("scenario_length", scenario_length)
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec(sample_simulator_state)
@@ -219,12 +216,12 @@ def train(
     actor_update = gradient_update_fn(
         actor_loss,
         actor_optimizer,
-        pmap_axis_name="i",
+        pmap_axis_name="batch",
     )
     critic_update = gradient_update_fn(
         critic_loss,
         critic_optimizer,
-        pmap_axis_name="i",
+        pmap_axis_name="batch",
     )
 
     def sgd_step(
@@ -275,100 +272,108 @@ def train(
 
         return (new_training_state, key), metrics
 
-    def prefill_replay_buffer(
-        simulator_state,
-        buffer_state: ReplayBufferState,
-        key: jax.random.PRNGKey,
-    ):
-        def f(carry, unused_t):
-            simulator_state, buffer_state, key = carry
-            key, new_key = jax.random.split(key)
-
-            simulator_state, transitions = random_step(env, simulator_state, action_shape, key)
-            buffer_state = replay_buffer.insert(buffer_state, transitions)
-
-            return (simulator_state, buffer_state, new_key), ()
-
-        return jax.lax.scan(
-            f,
-            (simulator_state, buffer_state, key),
-            (),
-            length=num_prefill_actor_steps,
-        )[0]
-
-    def training_step(
-        training_state: TrainingState,
-        simulator_state,
-        buffer_state: ReplayBufferState,
-        key: jax.random.PRNGKey,
-    ):
-        experience_key, training_key = jax.random.split(key)
-
-        # Rollout step
-        policy = make_policy(training_state.actor_params)
-        next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
-        mask = info["masked_envs"]
-        mask_size = info["mask_size"]
-
-        buffer_state = replay_buffer.insert(buffer_state, transition, mask, mask_size)
-
-        # TODO: Temporary fix to avoid having to deal with the mask
-        # Replace new state with old state for masked environments
-        # next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
-
-        # Learning step
-        next_buffer_state, transitions = replay_buffer.sample(buffer_state)
-        transitions = jax.tree_util.tree_map(
-            lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
-            transitions,
-        )
-        (next_training_state, _), sgd_metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
-
-        return next_training_state, next_simulator_state, next_buffer_state, sgd_metrics
-
-    def training_episode(
-        carry: tuple[TrainingState, ReplayBufferState, jax.random.PRNGKey],
-        simulator_state,
-    ):
-        training_state, buffer_state, key = carry
-
-        def f(carry, unused_t):
-            ts, ss, bs, k = carry
-            k, new_key = jax.random.split(k)
-            ts, ss, bs, sm = training_step(ts, ss, bs, k)
-
-            return (ts, ss, bs, new_key), sm
-
-        _simulator_state = env.reset(simulator_state)
-
-        (training_state, simulator_state, buffer_state, key), sgd_metrics = jax.lax.scan(
-            f,
-            (training_state, _simulator_state, buffer_state, key),
-            (),
-            length=scenario_length,
-        )
-
-        metrics = {**{f"training/{name}": value for name, value in sgd_metrics.items()}}
-        metrics = jax.tree_util.tree_map(jnp.mean, sgd_metrics)
-
-        return (training_state, buffer_state, key), metrics
-
     def training_epoch(
         batch_simulator_state,
         training_state: TrainingState,
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
     ):
+        def training_step(carry, _x):
+            training_state, simulator_state, buffer_state, key = carry
+
+            experience_key, training_key, next_key = jax.random.split(key, 3)
+
+            # Rollout step
+            policy = make_policy(training_state.actor_params)
+            next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
+            mask = info["masked_envs"]
+            mask_size = info["mask_size"]
+
+            buffer_state = replay_buffer.insert(buffer_state, transition, mask, mask_size)
+
+            # TODO: Temporary fix to avoid having to deal with the mask
+            # Replace new state with old state for masked environments
+            # next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
+
+            # Learning step
+            next_buffer_state, transitions = replay_buffer.sample(buffer_state)
+            transitions = jax.tree_util.tree_map(
+                lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
+                transitions,
+            )
+            (next_training_state, _), sgd_metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
+
+            metrics = {**{f"training/{name}": value for name, value in sgd_metrics.items()}}
+
+            return (next_training_state, next_simulator_state, next_buffer_state, next_key), metrics
+
+        def training_episode(carry, simulator_state):
+            training_state, buffer_state, key = carry
+
+            init_simulator_state = env.reset(simulator_state)
+
+            (next_training_state, _, next_buffer_state, next_key), metrics = jax.lax.scan(
+                training_step,
+                (training_state, init_simulator_state, buffer_state, key),
+                None,
+                length=scenario_length,
+            )
+
+            metrics = jax.tree_util.tree_map(jnp.mean, metrics)
+
+            return (next_training_state, next_buffer_state, next_key), metrics
+
         key, local_key = jax.random.split(key)
 
         (training_state, buffer_state, _), metrics = jax.lax.scan(
             training_episode,
             (training_state, buffer_state, local_key),
             batch_simulator_state,
-            length=num_episode_per_epoch,
+            length=args.num_episode_per_epoch,
         )
 
         return training_state, buffer_state, metrics
+
+    def prefill_replay_buffer(
+        batch_simulator_state,
+        buffer_state: ReplayBufferState,
+        key: jax.random.PRNGKey,
+    ):
+        key, local_key = jax.random.split(key)
+
+        def run_random_step(carry, _x):
+            simulator_state, buffer_state, key = carry
+            step_key, next_key = jax.random.split(key)
+
+            next_simulator_state, transition, info = random_step(env, simulator_state, action_shape, step_key)
+            mask = info["masked_envs"]
+            mask_size = info["mask_size"]
+
+            next_buffer_state = replay_buffer.insert(buffer_state, transition, mask, mask_size)
+
+            return (next_simulator_state, next_buffer_state, next_key), None
+
+        def run_episode(carry, simulator_state):
+            buffer_state, key = carry
+            init_simulator_state = env.reset(simulator_state)
+
+            _, next_buffer_state, next_key = jax.lax.scan(
+                run_random_step, (init_simulator_state, buffer_state, key), None, length=scenario_length,
+            )[0]
+
+            return (next_buffer_state, next_key), None
+
+        buffer_state, _ = jax.lax.scan(
+            run_episode,
+            (buffer_state, local_key),
+            batch_simulator_state,
+            length=args.num_episode_per_epoch,
+        )[0]
+
+        return buffer_state
+
+    training_epoch = jax.pmap(training_epoch, axis_name="batch")
+    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
     global_key, local_key = jax.random.split(rng)
 
@@ -383,8 +388,6 @@ def train(
 
     local_key, rb_key = jax.random.split(local_key, 2)
 
-    prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
-    training_epoch = jax.pmap(training_epoch, axis_name="i")
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
     # Create and initialize the replay buffer
@@ -396,11 +399,11 @@ def train(
     print("simulator", sample_simulator_state.shape)
     print("prefill_keys", prefill_keys.shape)
 
-    # simulator_state, buffer_state, _ = prefill_replay_buffer(
-    #     sample_simulator_state,
-    #     buffer_state,
-    #     prefill_keys,
-    # )
+    buffer_state = prefill_replay_buffer(
+        next(data_generator),
+        buffer_state,
+        prefill_keys,
+    )
 
     # Main training loop
     current_step = 0
@@ -413,11 +416,9 @@ def train(
         epoch_key, local_key = jax.random.split(local_key)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
-        batch_simulator_state = next(data_generator)
-
         t = perf_counter()
         training_state, buffer_state, training_metrics = training_epoch(
-            batch_simulator_state,
+            next(data_generator),
             training_state,
             buffer_state,
             epoch_keys,

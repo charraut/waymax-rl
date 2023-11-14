@@ -91,7 +91,7 @@ def synchronize_hosts():
 
     # Make sure all processes stay up until the end of main
     x = jnp.ones([jax.local_device_count()])
-    x = jax.device_get(jax.pmap(lambda x: jax.lax.psum(x, "i"), "i")(x))
+    x = jax.device_get(jax.pmap(lambda x: jax.lax.psum(x, "batch"), "batch")(x))
 
     assert x[0] == jax.device_count()
 
@@ -126,9 +126,9 @@ def assert_is_replicated(x: Any, debug: Any = None):
       x: Object to check replication.
       debug: Debug message in case of failure.
     """
-    f = functools.partial(is_replicated, axis_name="i")
+    f = functools.partial(is_replicated, axis_name="batch")
 
-    assert jax.pmap(f, axis_name="i")(x)[0], debug
+    assert jax.pmap(f, axis_name="batch")(x)[0], debug
 
 
 def unpmap(v):
