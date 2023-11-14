@@ -8,7 +8,7 @@ import jax
 from tensorboardX import SummaryWriter
 
 from waymax_rl.algorithms.sac import train
-from waymax_rl.simulator import create_bicycle_env, create_bicycle_env_eval
+from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
 
 
@@ -17,7 +17,7 @@ def parse_args():
 
     # Training
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
-    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--num_envs", type=int, default=4)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--log_freq", type=int, default=10000)
@@ -58,7 +58,7 @@ def setup_debugging(args):
     args.num_save = 1
     args.buffer_size = 10_000
     args.learning_start = 100
-    args.num_envs = 1
+    args.num_envs = 4
     args.batch_size = 16
     args.max_num_objects = 8
     args.trajectory_length = 1
@@ -100,6 +100,9 @@ def setup_run(args):
 if __name__ == "__main__":
     _args = parse_args()
 
+    os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+    jax.config.update("jax_platform_name", "cpu")
+
     if _args.debug or _args.debug_tpu:
         setup_debugging(_args)
         path_to_save_model = None
@@ -120,16 +123,16 @@ if __name__ == "__main__":
         trajectory_length=_args.trajectory_length,
     )
 
-    eval_env = create_bicycle_env_eval(
-        path_dataset=_args.path_dataset,
-        max_num_objects=_args.max_num_objects,
-        num_envs=_args.num_envs,
-        trajectory_length=_args.trajectory_length,
-    )
+    # eval_env = create_bicycle_env_eval(
+    #     path_dataset=_args.path_dataset,
+    #     max_num_objects=_args.max_num_objects,
+    #     num_envs=_args.num_envs,
+    #     trajectory_length=_args.trajectory_length,
+    # )
 
     train(
         environment=env,
-        eval_environment=eval_env,
+        eval_environment=None,
         args=_args,
         progress_fn=progress,
         checkpoint_logdir=path_to_save_model,

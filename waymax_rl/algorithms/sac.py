@@ -6,6 +6,9 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax import linen
+from waymax.config import DataFormat, DatasetConfig
+from waymax.dataloader import simulator_state_generator
+from waymax.datatypes.operations import update_by_mask
 
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
 from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
@@ -16,7 +19,7 @@ from waymax_rl.algorithms.utils.networks import (
     make_critic_network,
     make_inference_fn,
 )
-from waymax_rl.evaluate import Evaluator
+from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBaseEnv
 from waymax_rl.utils import (
@@ -131,25 +134,32 @@ def train(
     start_train_func = perf_counter()
 
     rng = jax.random.PRNGKey(args.seed)
-    rng, simulator_key = jax.random.split(rng)
-
-    # Devices handling
-    if args.num_envs > 1:
-        raise NotImplementedError("Multiple environments are not supported yet")
 
     num_devices = jax.local_device_count()
 
-    num_epoch = max(args.log_freq, 1)
-    num_prefill_actor_steps = args.learning_start // args.num_envs
-    num_training_steps_per_epoch = args.total_timesteps // num_epoch
-    save_freq = num_epoch // args.num_save
-
     # Environment
     env = environment
-    simulator_state = jax.pmap(env.init)(jax.random.split(simulator_key, num_devices))
+
+    dataset = DatasetConfig(
+        path=WOD_1_0_0_TRAINING_BUCKET,
+        max_num_rg_points=20000,
+        data_format=DataFormat.TFRECORD,
+        max_num_objects=args.max_num_objects,
+        batch_dims=(args.num_envs,),
+        distributed=True,
+        shuffle_seed=args.seed,
+    )
+
+    data_generator = simulator_state_generator(dataset)
+    sample_simulator_state = env.reset(next(data_generator))
+    scenario_length = sample_simulator_state.remaining_timesteps
+
+    num_prefill_actor_steps = args.learning_start // args.num_envs
+    n_episode = args.total_timesteps // scenario_length
+    save_freq = n_episode // args.num_save
 
     # Observation & action spaces dimensions
-    obs_size = env.observation_spec()
+    obs_size = env.observation_spec(sample_simulator_state)
     action_size = env.action_spec().data.shape[0]
     action_shape = (args.num_envs, action_size)
     print(f"observation size: {obs_size}")
@@ -287,25 +297,25 @@ def train(
 
         # Rollout step
         policy = make_policy(training_state.actor_params)
-        simulator_state, transitions = policy_step(env, simulator_state, policy, experience_key)
-        buffer_state = replay_buffer.insert(buffer_state, transitions)
+        next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
+        mask = info["masked_envs"]
+
+        buffer_state = replay_buffer.insert(buffer_state, transition, mask)
+
+        # Replace new state with old state for masked environments
+        next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
 
         # Learning step
-        buffer_state, transitions = replay_buffer.sample(buffer_state)
+        next_buffer_state, transitions = replay_buffer.sample(buffer_state)
         transitions = jax.tree_util.tree_map(
             lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
             transitions,
         )
-        (training_state, _), _metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
+        (next_training_state, _), sgd_metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
 
-        metrics = {
-            "rollout/buffer_current_size": replay_buffer.size(buffer_state),
-            **{f"training/{name}": value for name, value in _metrics.items()},
-        }
+        return next_training_state, next_simulator_state, next_buffer_state, sgd_metrics
 
-        return training_state, simulator_state, buffer_state, metrics
-
-    def training_epoch(
+    def training_episode(
         training_state: TrainingState,
         simulator_state,
         buffer_state: ReplayBufferState,
@@ -314,20 +324,32 @@ def train(
         def f(carry, unused_t):
             ts, ss, bs, k = carry
             k, new_key = jax.random.split(k)
-            ts, ss, bs, metrics = training_step(ts, ss, bs, k)
+            ts, ss, bs, sm = training_step(ts, ss, bs, k)
 
-            return (ts, ss, bs, new_key), metrics
+            return (ts, ss, bs, new_key), sm
 
-        (training_state, simulator_state, buffer_state, key), metrics = jax.lax.scan(
+        (training_state, simulator_state, buffer_state, key), sgd_metrics = jax.lax.scan(
             f,
-            (training_state, simulator_state, buffer_state, key),
+            (training_state, env.reset(simulator_state), buffer_state, key),
             (),
-            length=num_training_steps_per_epoch,
+            length=scenario_length,
         )
 
-        metrics = jax.tree_util.tree_map(jnp.mean, metrics)
+        metrics = {**{f"training/{name}": value for name, value in sgd_metrics.items()}}
+
+        metrics = jax.tree_util.tree_map(jnp.mean, sgd_metrics)
 
         return training_state, simulator_state, buffer_state, metrics
+
+    # def training_epoch(
+    #     training_state: TrainingState,
+    #     simulator_state,
+    #     buffer_state: ReplayBufferState,
+    #     key: jax.random.PRNGKey,
+    # ):
+    #     key, local_key = jax.random.split(key)
+
+    #     result = jax
 
     global_key, local_key = jax.random.split(rng)
 
@@ -343,26 +365,23 @@ def train(
     local_key, rb_key = jax.random.split(local_key, 2)
 
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
-    training_epoch = jax.pmap(training_epoch, axis_name="i")
+    training_episode = jax.pmap(training_episode, axis_name="i")
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
     # Create and initialize the replay buffer
-    prefill_key, eval_key, local_key = jax.random.split(local_key, 3)
+    prefill_key, local_key = jax.random.split(local_key, 2)
     prefill_keys = jax.random.split(prefill_key, num_devices)
 
     print("shape check".center(50, "="))
     print("buffer", buffer_state.data.shape)
-    print("simulator", simulator_state.shape)
+    print("simulator", sample_simulator_state.shape)
     print("prefill_keys", prefill_keys.shape)
 
-    evaluator = Evaluator(key=eval_key, eval_env=eval_environment, eval_policy_fn=make_policy)
-    # run_evaluation = jax.pmap(evaluator.run_evaluation)(training_state.actor_params)
-
-    simulator_state, buffer_state, _ = prefill_replay_buffer(
-        simulator_state,
-        buffer_state,
-        prefill_keys,
-    )
+    # simulator_state, buffer_state, _ = prefill_replay_buffer(
+    #     sample_simulator_state,
+    #     buffer_state,
+    #     prefill_keys,
+    # )
 
     # Main training loop
     current_step = 0
@@ -371,35 +390,30 @@ def train(
 
     time_training = perf_counter()
 
-    for i in range(num_epoch):
+    for i in range(n_episode):
         epoch_key, local_key = jax.random.split(local_key)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
-        # Training
+        simulator_state = next(data_generator)
+
         t = perf_counter()
-        (training_state, simulator_state, buffer_state, training_metrics) = training_epoch(
+        (training_state, simulator_state, buffer_state, training_metrics) = training_episode(
             training_state,
             simulator_state,
             buffer_state,
             epoch_keys,
         )
+        epoch_training_time = perf_counter() - t
+
         training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)
-        epoch_training_time = perf_counter() - t
-        current_step = i * num_training_steps_per_epoch
-        sps = int((args.num_envs * num_training_steps_per_epoch) / epoch_training_time)
 
-        # Evaluation
-        params = unpmap(training_state.actor_params)
-        evaluation_metrics = evaluator.run_evaluation(params)
-        # evaluation_metrics = run_evaluation(training_state.actor_params)
-        # evaluation_metrics = jax.tree_util.tree_map(jnp.mean, evaluation_metrics)
-        # jax.tree_util.tree_map(lambda x: x.block_until_ready(), evaluation_metrics)
+        current_step = i * scenario_length
+        sps = int((args.num_envs * scenario_length) / epoch_training_time)
 
         metrics = {
             "rollout/sps": sps,
             **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
-            **{f"{name}": jnp.round(value, 4) for name, value in evaluation_metrics.items()},
         }
 
         params = unpmap(training_state.actor_params)
@@ -416,14 +430,14 @@ def train(
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
 
-    params = unpmap(training_state.actor_params)
+    final_params = unpmap(training_state.actor_params)
 
     if checkpoint_logdir:
         path = f"{checkpoint_logdir}/model_final.pkl"
-        save_params(path, params)
+        save_params(path, final_params)
 
     # If there was no mistakes the training_state should still be identical on all devices
     assert_is_replicated(training_state)
     synchronize_hosts()
 
-    return (make_policy, params)
+    return (make_policy, final_params)

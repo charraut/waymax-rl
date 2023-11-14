@@ -4,8 +4,7 @@ import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
-from waymax.config import DataFormat, DatasetConfig, EnvironmentConfig, LinearCombinationRewardConfig
-from waymax.dataloader import simulator_state_generator
+from waymax.config import EnvironmentConfig, LinearCombinationRewardConfig
 from waymax.datatypes import Action, SimulatorState
 from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
@@ -39,9 +38,6 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         self,
         dynamics_model: DynamicsModel,
         env_config: EnvironmentConfig,
-        path_dataset: str,
-        max_num_objects: int = 64,
-        num_envs: int = 1,
         observation_fn: callable = None,
         reward_fn: callable = None,
     ) -> None:
@@ -49,60 +45,23 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
 
         super().__init__(dynamics_model, env_config)
 
-        self._max_num_objects = max_num_objects
-        self._num_envs = num_envs
-        self._data_generator = None
-
-        self._dataset_config = DatasetConfig(
-            path=path_dataset,
-            max_num_rg_points=20000,
-            data_format=DataFormat.TFRECORD,
-            max_num_objects=self._max_num_objects,
-            batch_dims=(self._num_envs,),
-        )
-
         if observation_fn is not None:
             self.observe = observation_fn
         if reward_fn is not None:
             self.reward = reward_fn
 
-    def observation_spec(self):
-        observation = self.observe(self.iter_scenario)
+        self._keep_mask = None
+
+    def observation_spec(self, state: SimulatorState):
+        observation = self.observe(state)
 
         return observation.shape[-1]
 
-    @property
-    def max_num_objects(self):
-        return self._max_num_objects
+    def reset(self, state: SimulatorState) -> SimulatorState:
+        """Resets the environment."""
+        self._keep_mask = jnp.ones(state.batch_dims[-1], dtype=jnp.bool_)
 
-    @property
-    def num_envs(self):
-        return self._num_envs
-
-    @property
-    def iter_scenario(self) -> SimulatorState:
-        return next(self._data_generator)
-
-    def init(self, key: jax.random.PRNGKey) -> SimulatorState:
-        """Initializes the data generator."""
-        self._data_generator = simulator_state_generator(self._dataset_config)
-        n_draw = jax.random.randint(key, (), 0, 10)
-
-        return self.reset(n_draw=n_draw)
-
-    def reset(self, n_draw: int = 0) -> SimulatorState:
-        """Resets the environment by randomly drawing n times a new scenario from the dataset."""
-        def cond_fn(carry):
-            return carry[1] < n_draw
-
-        def body_fn(carry):
-            scenario = self.iter_scenario
-
-            return scenario, carry[1] + 1
-
-        scenario = jax.lax.while_loop(cond_fn, body_fn, (self.iter_scenario, 0))[0]
-
-        return super().reset(scenario)
+        return super().reset(state)
 
     def termination(self, state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""
@@ -124,8 +83,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
     def __init__(
         self,
         max_num_objects: int = 64,
-        num_envs: int = 1,
-        path_dataset: str | None = None,
         observation_fn: callable = None,
         reward_fn: callable = None,
         normalize_actions: bool = True,
@@ -146,9 +103,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         super().__init__(
             dynamics_model,
             env_config,
-            path_dataset,
-            max_num_objects,
-            num_envs,
             observation_fn,
             reward_fn,
         )
@@ -157,23 +111,32 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         """Take a step in the environment."""
 
         # Validate and wrap the action
-        _action = Action(data=action, valid=jnp.ones_like(action[..., 0:1], dtype=jnp.bool_))
-        _action.validate()
+        waymax_action = Action(data=action, valid=jnp.ones_like(action[..., 0:1], dtype=jnp.bool_))
+        waymax_action.validate()
 
         # Compute the next state and observations
-        next_state = super().step(state, _action)
+        next_state = super().step(state, waymax_action)
         next_obs = self.observe(next_state)
 
         # Calculate the reward and check for termination and truncation conditions
-        reward = self.reward(state, _action) + 1.0
+        reward = self.reward(state, waymax_action)
         termination = self.termination(next_state)
         truncation = self.truncation(next_state)
         done = jnp.logical_or(termination, truncation)
+
+        # Put mask at True if episode is done
+        self._keep_mask = jnp.logical_and(self._keep_mask, jnp.logical_not(done))
 
         # Determine the flag factor
         flag = jnp.logical_not(termination)
 
         metrics = self.metrics(next_state)
+
+        info = {
+            "masked_envs": jnp.logical_not(self._keep_mask),
+            "truncation": truncation,
+            "termination": termination,
+        }
 
         return EpisodeSlice(
             reward=reward,
@@ -182,4 +145,5 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             next_state=next_state,
             next_observation=next_obs,
             metrics=metrics,
+            info=info,
         )

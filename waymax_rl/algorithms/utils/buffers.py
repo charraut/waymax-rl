@@ -67,7 +67,7 @@ class UniformSamplingQueue(ReplayBuffer):
             key=key,
         )
 
-    def insert(self, buffer_state: ReplayBufferState, samples: Transition) -> ReplayBufferState:
+    def insert(self, buffer_state: ReplayBufferState, samples: Transition, mask: jax.Array) -> ReplayBufferState:
         """Insert data in the replay buffer.
 
         Args:
@@ -85,6 +85,7 @@ class UniformSamplingQueue(ReplayBuffer):
 
         # Flatten the samples
         new_samples = self._flatten_fn(samples)
+
         samples_size = len(new_samples)
 
         # Current buffer state

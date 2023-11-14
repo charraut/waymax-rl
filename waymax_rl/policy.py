@@ -51,7 +51,7 @@ def policy_step(
         done=episode_slice.done,
     )
 
-    return episode_slice.next_state, transition
+    return episode_slice.next_state, transition, episode_slice.info
 
 
 def random_step(

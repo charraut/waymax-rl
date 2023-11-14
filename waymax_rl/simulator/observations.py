@@ -17,7 +17,7 @@ def obs_global(state: SimulatorState, trajectory_length: int = 10, normalize: bo
         obs_num_steps=trajectory_length,
         roadgraph_top_k=50,
     )  # (num_envs, 1, num_objects, num_steps, 2)
-    observation = jax.tree_map(lambda x: x[:, 0], observation)  # (num_envs, num_objects, num_steps, 2)
+    # observation = jax.tree_map(lambda x: x[:, 0], observation)  # (num_envs, num_objects, num_steps, 2)
 
     # Extract all the data from the observation
     trajectory = observation.trajectory.xy  # (num_envs, num_objects, num_steps, 2)

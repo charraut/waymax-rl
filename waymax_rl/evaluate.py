@@ -1,7 +1,7 @@
 from functools import partial
 
 import jax
-import jax.numpy as jnp
+
 from waymax_rl.policy import rollout
 
 
