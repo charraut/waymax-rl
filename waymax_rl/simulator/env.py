@@ -1,5 +1,5 @@
 from typing import Any
-
+from functools import partial
 import chex
 import jax
 import jax.numpy as jnp
@@ -60,9 +60,11 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
     def reset(self, state: SimulatorState) -> SimulatorState:
         """Resets the environment."""
         self._keep_mask = jnp.ones(state.batch_dims[-1], dtype=jnp.bool_)
+        simulator_state = super().reset(state)
+        self._timesteps = jnp.full(state.batch_dims[-1], simulator_state.timestep)
 
-        return super().reset(state)
-
+        return simulator_state
+    
     def termination(self, state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""
         metrics = super().metrics(state)
@@ -132,8 +134,11 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
 
         metrics = self.metrics(next_state)
 
+        self._timesteps = jnp.where(self._keep_mask, self._timesteps, self._timesteps + 1)
+
         info = {
             "masked_envs": jnp.logical_not(self._keep_mask),
+            "timesteps": self._timesteps,
             "truncation": truncation,
             "termination": termination,
         }

@@ -303,7 +303,7 @@ def train(
         buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
         # Replace new state with old state for masked environments
-        next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
+        # next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
 
         # Learning step
         next_buffer_state, transitions = replay_buffer.sample(buffer_state)
@@ -336,7 +336,6 @@ def train(
         )
 
         metrics = {**{f"training/{name}": value for name, value in sgd_metrics.items()}}
-
         metrics = jax.tree_util.tree_map(jnp.mean, sgd_metrics)
 
         return training_state, simulator_state, buffer_state, metrics
