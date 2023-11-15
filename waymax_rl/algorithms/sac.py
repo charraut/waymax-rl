@@ -188,7 +188,7 @@ def train(
 
     # Create Replay Buffer
     replay_buffer = UniformSamplingQueue(
-        buffer_size=args.buffer_size // num_devices,
+        buffer_size=args.buffer_size,
         batch_size=args.batch_size * args.grad_updates_per_step // num_devices,
         dummy_data_sample=Transition(
             observation=jnp.zeros((obs_size,)),
