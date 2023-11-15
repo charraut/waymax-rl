@@ -448,7 +448,7 @@ def train(
 
         epoch_log_time = perf_counter() - t
 
-        current_step = epoch * scenario_length * args.num_envs
+        current_step = epoch * num_steps_per_epoch
         print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
         print(f"-> Data time     : {epoch_data_time:.2f}s")
         print(f"-> Training time : {epoch_training_time:.2f}s")
