@@ -154,9 +154,10 @@ def train(
 
     data_generator = simulator_state_generator(dataset)
     sample_simulator_state = env.reset(next(data_generator))
-    scenario_length = sample_simulator_state.remaining_timesteps
 
+    scenario_length = sample_simulator_state.remaining_timesteps
     num_epoch = args.total_timesteps // args.num_episode_per_epoch
+    num_steps_per_epoch = scenario_length * args.num_episode_per_epoch
     save_freq = num_epoch // args.num_save
 
     print("num_prefill_actor_steps", args.num_episode_per_epoch * scenario_length)
@@ -272,13 +273,13 @@ def train(
 
         return (new_training_state, key), metrics
 
-    def training_epoch(
+    def run_epoch(
         batch_simulator_state,
         training_state: TrainingState,
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
     ):
-        def training_step(carry, _x):
+        def run_step(carry, _x):
             training_state, simulator_state, buffer_state, key = carry
 
             experience_key, training_key, next_key = jax.random.split(key, 3)
@@ -287,9 +288,8 @@ def train(
             policy = make_policy(training_state.actor_params)
             next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
             mask = info["masked_envs"]
-            mask_size = info["mask_size"]
 
-            buffer_state = replay_buffer.insert(buffer_state, transition, mask, mask_size)
+            buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
             # TODO: Temporary fix to avoid having to deal with the mask
             # Replace new state with old state for masked environments
@@ -307,13 +307,13 @@ def train(
 
             return (next_training_state, next_simulator_state, next_buffer_state, next_key), metrics
 
-        def training_episode(carry, simulator_state):
+        def run_episode(carry, simulator_state):
             training_state, buffer_state, key = carry
 
             init_simulator_state = env.reset(simulator_state)
 
             (next_training_state, _, next_buffer_state, next_key), metrics = jax.lax.scan(
-                training_step,
+                run_step,
                 (training_state, init_simulator_state, buffer_state, key),
                 None,
                 length=scenario_length,
@@ -326,7 +326,7 @@ def train(
         key, local_key = jax.random.split(key)
 
         (training_state, buffer_state, _), metrics = jax.lax.scan(
-            training_episode,
+            run_episode,
             (training_state, buffer_state, local_key),
             batch_simulator_state,
             length=args.num_episode_per_epoch,
@@ -347,9 +347,8 @@ def train(
 
             next_simulator_state, transition, info = random_step(env, simulator_state, action_shape, step_key)
             mask = info["masked_envs"]
-            mask_size = info["mask_size"]
 
-            next_buffer_state = replay_buffer.insert(buffer_state, transition, mask, mask_size)
+            next_buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
             return (next_simulator_state, next_buffer_state, next_key), None
 
@@ -358,7 +357,10 @@ def train(
             init_simulator_state = env.reset(simulator_state)
 
             _, next_buffer_state, next_key = jax.lax.scan(
-                run_random_step, (init_simulator_state, buffer_state, key), None, length=scenario_length,
+                run_random_step,
+                (init_simulator_state, buffer_state, key),
+                None,
+                length=scenario_length,
             )[0]
 
             return (next_buffer_state, next_key), None
@@ -372,26 +374,23 @@ def train(
 
         return buffer_state
 
-    training_epoch = jax.pmap(training_epoch, axis_name="batch")
+    run_epoch = jax.pmap(run_epoch, axis_name="batch")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
-    global_key, local_key = jax.random.split(rng)
+    rng, training_key, rb_key = jax.random.split(rng, 3)
 
     training_state = init_training_state(
-        key=global_key,
+        key=training_key,
         num_devices=num_devices,
         neural_network=sac_network,
         actor_optimizer=actor_optimizer,
         critic_optimizer=critic_optimizer,
     )
-    del global_key
-
-    local_key, rb_key = jax.random.split(local_key, 2)
 
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
     # Create and initialize the replay buffer
-    prefill_key, local_key = jax.random.split(local_key, 2)
+    rng, prefill_key = jax.random.split(rng)
     prefill_keys = jax.random.split(prefill_key, num_devices)
 
     print("shape check".center(50, "="))
@@ -413,26 +412,27 @@ def train(
     time_training = perf_counter()
 
     for epoch in range(num_epoch):
-        epoch_key, local_key = jax.random.split(local_key)
+        rng, epoch_key = jax.random.split(rng)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
         t = perf_counter()
-        training_state, buffer_state, training_metrics = training_epoch(
-            next(data_generator),
+        simulator_state = next(data_generator)
+        epoch_data_time = perf_counter() - t
+
+        t = perf_counter()
+        training_state, buffer_state, training_metrics = run_epoch(
+            simulator_state,
             training_state,
             buffer_state,
             epoch_keys,
         )
         epoch_training_time = perf_counter() - t
 
+        t = perf_counter()
         training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)
-
-        current_step = epoch * scenario_length
-        sps = int((args.num_envs * scenario_length) / epoch_training_time)
-
         metrics = {
-            "rollout/sps": sps,
+            "rollout/sps": int(num_steps_per_epoch / epoch_training_time),
             **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
         }
 
@@ -444,7 +444,13 @@ def train(
             path = f"{checkpoint_logdir}/model_{current_step}.pkl"
             save_params(path, params)
 
+        epoch_log_time = perf_counter() - t
+
+        current_step = epoch * scenario_length * args.num_envs
         print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
+        print(f"-> Data time     : {epoch_data_time:.2f}s")
+        print(f"-> Training time : {epoch_training_time:.2f}s")
+        print(f"-> Log time      : {epoch_log_time:.2f}s")
         progress_fn(current_step, metrics)
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")

@@ -67,13 +67,7 @@ class UniformSamplingQueue(ReplayBuffer):
             key=key,
         )
 
-    def insert(
-        self,
-        buffer_state: ReplayBufferState,
-        samples: Transition,
-        mask: jax.Array,
-        mask_size: int,
-    ) -> ReplayBufferState:
+    def insert(self, buffer_state: ReplayBufferState, samples: Transition, mask: jax.Array) -> ReplayBufferState:
         """Insert data in the replay buffer.
 
         Args:
@@ -92,20 +86,22 @@ class UniformSamplingQueue(ReplayBuffer):
         # Flatten the samples
         _samples = self._flatten_fn(samples)
 
-        # TODO: Temporary fix to avoid having to deal with the mask
-        # indices_mask = jnp.nonzero(mask, size=mask_size)[0]
-        # valid_samples = jnp.take(_samples, indices_mask, axis=0)
-        valid_samples = _samples
-        samples_size = len(valid_samples)
+        # Padded indices of the mask elements
+        samples_size = jnp.sum(mask)
+        mask_indices = jnp.where(mask, size=len(mask), fill_value=len(mask))
 
         # Current buffer state
         data = buffer_state.data
         insert_idx = buffer_state.insert_position
+        size_buffer = buffer_state.sample_position
 
-        # Update the buffer and the control numbers
-        data = jax.lax.dynamic_update_slice_in_dim(data, valid_samples, insert_idx, axis=0)
-        insert_idx = (insert_idx + samples_size) % self._size
-        sample_idx = jnp.minimum(buffer_state.sample_position + samples_size, self._size)
+        # Create a copy of the buffer with samples inserted at insert_idx
+        data_indices = insert_idx + jnp.arange(len(mask))
+        update_mask = jnp.arange(len(mask))[:, None] < samples_size
+
+        data = data.at[data_indices].set(jnp.where(update_mask, _samples[mask_indices], data[data_indices]))
+        insert_idx = (insert_idx + samples_size) % size_buffer
+        sample_idx = jnp.minimum(buffer_state.sample_position + samples_size, size_buffer)
 
         return buffer_state.replace(
             data=data,
