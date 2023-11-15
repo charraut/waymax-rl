@@ -8,21 +8,17 @@ from waymax_rl.simulator.observations import obs_global
 
 def create_bicycle_env(
     max_num_objects: int = 64,
-    num_envs: int = 1,
-    path_dataset: str | None = None,
     trajectory_length: int = 1,
     observation_fn: Callable | None = obs_global,
     reward_fn: Callable | None = None,
 ):
     obs_fn = partial(observation_fn, trajectory_length=trajectory_length)
 
-    env = WaymaxBicycleEnv(
+    return WaymaxBicycleEnv(
         max_num_objects=max_num_objects,
         observation_fn=obs_fn,
         reward_fn=reward_fn,
     )
-
-    return env
 
 
 def create_bicycle_env_eval(
