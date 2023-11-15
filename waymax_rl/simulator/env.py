@@ -10,12 +10,20 @@ from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 
 
+@chex.dataclass
+class EnvState:
+    simulator_state: SimulatorState
+    timesteps: jax.Array
+    mask: jax.Array
+    episode_reward: jax.Array
+
+
 @chex.dataclass(frozen=True)
 class EpisodeSlice:
     """Container class for Waymax transitions.
 
     Attributes:
-      state: The current simulation state of shape (num_envs,).
+      simulator_state: The current simulation state of shape (num_envs,).
       observation: The current observation of shape (num_envs, ...).
       reward: The reward obtained in the current transition of shape (num_envs,).
       done: A boolean array denoting the end of an episode of shape (num_envs,).
@@ -27,7 +35,7 @@ class EpisodeSlice:
     reward: jax.Array
     done: jax.Array
     flag: jax.Array
-    next_state: SimulatorState
+    next_env_state: EnvState
     next_observation: jax.Array
     metrics: dict[str, Any] = struct.field(default_factory=dict)
     info: dict[str, Any] = struct.field(default_factory=dict)
@@ -50,32 +58,36 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         if reward_fn is not None:
             self.reward = reward_fn
 
-        self._mask_env = None
-        self._timesteps = None
-
-    def observation_spec(self, state: SimulatorState):
-        observation = self.observe(state)
+    def observation_spec(self, simulator_state: SimulatorState):
+        observation = self.observe(simulator_state)
 
         return observation.shape[-1]
 
-    def reset(self, state: SimulatorState) -> SimulatorState:
+    def reset(self, simulator_state: SimulatorState) -> EnvState:
         """Resets the environment."""
-        self._mask_env = jnp.ones(state.batch_dims[-1], dtype=jnp.bool_)
+        simulator_state = super().reset(simulator_state)
 
-        simulator_state = super().reset(state)
-        self._timesteps = jnp.full(state.batch_dims[-1], simulator_state.timestep)
+        mask = jnp.ones(simulator_state.batch_dims[-1], dtype=jnp.bool_)
+        timesteps = jnp.full(simulator_state.batch_dims[-1], simulator_state.timestep)
+        episode_reward = jnp.zeros(simulator_state.batch_dims[-1])
+        env_state = EnvState(
+            simulator_state=simulator_state,
+            timesteps=timesteps,
+            mask=mask,
+            episode_reward=episode_reward,
+        )
 
-        return simulator_state
+        return env_state
 
-    def termination(self, state: SimulatorState) -> jax.Array:
+    def termination(self, simulator_state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""
-        metrics = super().metrics(state)
+        metrics = super().metrics(simulator_state)
 
         return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
 
-    def metrics(self, state: SimulatorState) -> dict[str, jax.Array]:
+    def metrics(self, simulator_state: SimulatorState) -> dict[str, jax.Array]:
         """Returns a dictionary of metrics."""
-        metric_dict = super().metrics(state)
+        metric_dict = super().metrics(simulator_state)
 
         for key, metric in metric_dict.items():
             metric_dict[key] = jnp.mean(metric.value)
@@ -98,8 +110,8 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             max_num_objects=max_num_objects,
             rewards=LinearCombinationRewardConfig(
                 rewards={
-                    "overlap": -2.0,
-                    "offroad": -2.0,
+                    "overlap": -10.0,
+                    "offroad": -10.0,
                 },
             ),
         )
@@ -111,48 +123,44 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             reward_fn,
         )
 
-    def step(self, state: SimulatorState, action: jax.Array) -> EpisodeSlice:
+    def step(self, env_state: EnvState, action: jax.Array) -> EpisodeSlice:
         """Take a step in the environment."""
 
         # Validate and wrap the action
         waymax_action = Action(data=action, valid=jnp.ones_like(action[..., 0:1], dtype=jnp.bool_))
         waymax_action.validate()
 
-        # Compute the next state and observations
-        next_state = super().step(state, waymax_action)
-        next_obs = self.observe(next_state)
+        current_simulator_state = env_state.simulator_state
+
+        # Compute the next simulator_state and observations
+        next_simulator_state = super().step(current_simulator_state, waymax_action)
+        next_obs = self.observe(next_simulator_state)
 
         # Calculate the reward and check for termination and truncation conditions
-        reward = self.reward(state, waymax_action)
-        termination = self.termination(next_state)
-        truncation = self.truncation(next_state)
+        reward = self.reward(next_simulator_state, waymax_action)
+        termination = self.termination(next_simulator_state)
+        truncation = self.truncation(next_simulator_state)
+        metrics = self.metrics(next_simulator_state)
+
         done = jnp.logical_or(termination, truncation)
-
-        # Put mask at True if episode is done
-        self._mask_env = jnp.logical_and(self._mask_env, jnp.logical_not(done))
-
-        # Determine the flag factor
         flag = jnp.logical_not(termination)
 
-        metrics = self.metrics(next_state)
+        mask = jnp.logical_and(env_state.mask, jnp.logical_not(done))
+        timesteps = jnp.where(env_state.mask, env_state.timesteps + 1, env_state.timesteps)
+        episode_reward = jnp.where(env_state.mask, env_state.episode_reward + reward, env_state.episode_reward)
 
-        self._timesteps = jnp.where(
-            self._mask_env, jnp.full(state.batch_dims[-1], next_state.timestep), self._timesteps
+        next_env_state = env_state.replace(
+            simulator_state=next_simulator_state,
+            timesteps=timesteps,
+            mask=mask,
+            episode_reward=episode_reward,
         )
-
-        info = {
-            "mask_env": self._mask_env,
-            "timesteps": self._timesteps,
-            "truncation": truncation,
-            "termination": termination,
-        }
 
         return EpisodeSlice(
             reward=reward,
             flag=flag,
             done=termination,
-            next_state=next_state,
+            next_env_state=next_env_state,
             next_observation=next_obs,
             metrics=metrics,
-            info=info,
         )

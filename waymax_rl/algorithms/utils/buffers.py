@@ -90,9 +90,6 @@ class UniformSamplingQueue(ReplayBuffer):
         samples_size = jnp.sum(mask)
         mask_indices = jnp.where(mask, size=len(mask), fill_value=len(mask))
 
-        jax.debug.print("mask: {x}", x=mask)
-        jax.debug.print("mask_indices: {x}", x=mask_indices)
-
         # Current buffer state
         data = buffer_state.data
         insert_idx = buffer_state.insert_position
@@ -101,10 +98,6 @@ class UniformSamplingQueue(ReplayBuffer):
         # Create a copy of the buffer with samples inserted at insert_idx
         data_indices = (insert_idx + jnp.arange(len(mask))) % self._size
         update_mask = jnp.arange(len(mask))[:, None] < samples_size
-
-        jax.debug.print("insert_idx: {x}", x=insert_idx)
-        jax.debug.print("data_indices: {x}", x=data_indices)
-        jax.debug.print("update_mask: {x}\n", x=update_mask)
 
         data = data.at[data_indices].set(jnp.where(update_mask, _samples[mask_indices], data[data_indices]))
         insert_idx = (insert_idx + samples_size) % self._size

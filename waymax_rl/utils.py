@@ -4,12 +4,13 @@ import pickle
 from argparse import ArgumentParser
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple, TypeVar
-from waymax.config import DatasetConfig, DataFormat
+
 import flax
 import jax
 import jax.numpy as jnp
 import optax
 from etils import epath
+from waymax.config import DataFormat, DatasetConfig
 
 
 Params = Any

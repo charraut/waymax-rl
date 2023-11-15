@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import optax
 from flax import linen
 from waymax.dataloader import simulator_state_generator
-from waymax.datatypes.operations import update_by_mask
+
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
 from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
 from waymax_rl.algorithms.utils.networks import (
@@ -17,7 +17,6 @@ from waymax_rl.algorithms.utils.networks import (
     make_critic_network,
     make_inference_fn,
 )
-from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator.env import WaymaxBaseEnv
 from waymax_rl.utils import (
@@ -29,10 +28,10 @@ from waymax_rl.utils import (
     Transition,
     assert_is_replicated,
     init_training_state,
+    make_dataset_config,
     save_params,
     synchronize_hosts,
     unpmap,
-    make_dataset_config,
 )
 
 
@@ -147,7 +146,7 @@ def train(
     )
 
     data_generator = simulator_state_generator(dataset)
-    sample_simulator_state = env.reset(next(data_generator))
+    sample_simulator_state = env.reset(next(data_generator)).simulator_state
 
     scenario_length = sample_simulator_state.remaining_timesteps
     num_epoch = args.total_timesteps // args.num_episode_per_epoch
@@ -274,18 +273,17 @@ def train(
         key: jax.random.PRNGKey,
     ):
         def run_step(carry, _x):
-            training_state, simulator_state, buffer_state, key = carry
+            training_state, env_state, buffer_state, key = carry
 
             experience_key, training_key, next_key = jax.random.split(key, 3)
 
             # Rollout step
             policy = make_policy(training_state.actor_params)
-            next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
-            mask = info["mask_env"]
+            next_env_state, transition = policy_step(env, env_state, policy, experience_key)
 
-            jax.debug.print("simulator_state timesteps: {x}", x=simulator_state.timestep)
-            jax.debug.print("next_simulator_state timesteps: {x}", x=next_simulator_state.timestep)
-            jax.debug.print("info: {x}", x=info)
+            mask = next_env_state.mask
+            timesteps = next_env_state.timesteps
+            episode_reward = next_env_state.episode_reward
 
             buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
@@ -303,19 +301,25 @@ def train(
 
             metrics = {**{f"training/{name}": value for name, value in sgd_metrics.items()}}
 
-            return (next_training_state, next_simulator_state, next_buffer_state, next_key), metrics
+            return (next_training_state, next_env_state, next_buffer_state, next_key), metrics
 
         def run_episode(carry, simulator_state):
             training_state, buffer_state, key = carry
 
-            init_simulator_state = env.reset(simulator_state)
+            init_env_state = env.reset(simulator_state)
 
-            (next_training_state, _, next_buffer_state, next_key), metrics = jax.lax.scan(
+            (next_training_state, final_env_state, next_buffer_state, next_key), metrics = jax.lax.scan(
                 run_step,
-                (training_state, init_simulator_state, buffer_state, key),
+                (training_state, init_env_state, buffer_state, key),
                 None,
                 length=scenario_length,
             )
+
+            metrics = {
+                "rollout/episode_reward": final_env_state.episode_reward,
+                "rollout/episode_length": final_env_state.timesteps,
+                **metrics,
+            }
 
             metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
@@ -340,27 +344,23 @@ def train(
         key, local_key = jax.random.split(key)
 
         def run_random_step(carry, _x):
-            simulator_state, buffer_state, key = carry
-            jax.debug.print("simulator_state timesteps: {x}", x=simulator_state.timestep)
+            env_state, buffer_state, key = carry
             step_key, next_key = jax.random.split(key)
 
-            next_simulator_state, transition, info = random_step(env, simulator_state, action_shape, step_key)
-            mask = info["mask_env"]
-            jax.debug.print("simulator_state timesteps: {x}", x=simulator_state.timestep)
-            jax.debug.print("next_simulator_state timesteps: {x}", x=next_simulator_state.timestep)
-            jax.debug.print("info: {x}", x=info)
+            next_env_state, transition = random_step(env, env_state, action_shape, step_key)
+            mask = next_env_state.mask
 
             next_buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
-            return (next_simulator_state, next_buffer_state, next_key), None
+            return (next_env_state, next_buffer_state, next_key), None
 
         def run_episode(carry, simulator_state):
             buffer_state, key = carry
-            init_simulator_state = env.reset(simulator_state)
+            init_env_state = env.reset(simulator_state)
 
             _, next_buffer_state, next_key = jax.lax.scan(
                 run_random_step,
-                (init_simulator_state, buffer_state, key),
+                (init_env_state, buffer_state, key),
                 None,
                 length=scenario_length,
             )[0]

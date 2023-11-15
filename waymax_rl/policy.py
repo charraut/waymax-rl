@@ -9,12 +9,12 @@ from waymax_rl.utils import Transition
 if TYPE_CHECKING:
     from waymax.datatypes import SimulatorState
 
-    from waymax_rl.simulator.env import WaymaxBaseEnv
+    from waymax_rl.simulator.env import EnvState, WaymaxBaseEnv
 
 
 def policy_step(
     env: "WaymaxBaseEnv",
-    simulator_state: "SimulatorState",
+    env_state: "EnvState",
     policy: callable,
     key: jax.random.PRNGKey = None,
 ) -> tuple:
@@ -33,13 +33,13 @@ def policy_step(
     - metrics: Additional metrics or information returned by the environment after the step.
     """
     # Obtain the current observation from the environment
-    observation = env.observe(simulator_state)
+    observation = env.observe(env_state.simulator_state)
 
     # Determine actions based on the given policy and observation
     actions = policy(observation, key)
 
     # Apply the actions to the environment and get the resulting slice of the episode
-    episode_slice = env.step(simulator_state, actions)
+    episode_slice = env.step(env_state, actions)
 
     # Create a transition object to encapsulate the step information
     transition = Transition(
@@ -51,12 +51,12 @@ def policy_step(
         done=episode_slice.done,
     )
 
-    return episode_slice.next_state, transition, episode_slice.info
+    return episode_slice.next_env_state, transition
 
 
 def random_step(
     env: "WaymaxBaseEnv",
-    simulator_state: "SimulatorState",
+    env_state: "EnvState",
     action_shape: tuple,
     key: jax.random.PRNGKey,
     action_bounds: tuple[float, float] = (-1.0, 1.0),
@@ -75,11 +75,11 @@ def random_step(
     - state: The new state of the simulator after the step.
     - transition: A Transition object containing details of the step.
     """
-    observation = env.observe(simulator_state)
+    observation = env.observe(env_state.simulator_state)
 
     # Generating actions within the specified bounds
     actions = jax.random.uniform(key=key, shape=action_shape, minval=action_bounds[0], maxval=action_bounds[1])
-    episode_slice = env.step(simulator_state, actions)
+    episode_slice = env.step(env_state, actions)
 
     transition = Transition(
         observation=observation,
@@ -90,7 +90,7 @@ def random_step(
         done=episode_slice.done,
     )
 
-    return episode_slice.next_state, transition, episode_slice.info
+    return episode_slice.next_env_state, transition
 
 
 def rollout(sim_state: "SimulatorState", env: "WaymaxBaseEnv", policy: callable) -> tuple:
