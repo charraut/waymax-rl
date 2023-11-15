@@ -150,7 +150,7 @@ def train(
 
     scenario_length = sample_simulator_state.remaining_timesteps
     num_epoch = args.total_timesteps // args.num_episode_per_epoch
-    num_steps_per_epoch = scenario_length * args.num_episode_per_epoch
+    num_steps_per_epoch = scenario_length * args.num_episode_per_epoch * args.num_envs
     save_freq = num_epoch // args.num_save
 
     print("num_prefill_actor_steps", args.num_episode_per_epoch * scenario_length)
