@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import optax
 from etils import epath
 from waymax.config import DataFormat, DatasetConfig
+from waymax.dataloader import simulator_state_generator
 
 
 Params = Any
@@ -74,15 +75,17 @@ def init_training_state(
     return jax.device_put_replicated(training_state, jax.local_devices()[:num_devices])
 
 
-def make_dataset_config(path: str, max_num_objects: int, batch_dims: tuple, seed: int):
-    return DatasetConfig(
-        path=path,
-        max_num_rg_points=20000,
-        data_format=DataFormat.TFRECORD,
-        max_num_objects=max_num_objects,
-        batch_dims=batch_dims,
-        distributed=True,
-        shuffle_seed=seed,
+def make_simulator_state_generator(path: str, max_num_objects: int, batch_dims: tuple, seed: int):
+    return simulator_state_generator(
+        DatasetConfig(
+            path=path,
+            max_num_rg_points=20000,
+            data_format=DataFormat.TFRECORD,
+            max_num_objects=max_num_objects,
+            batch_dims=batch_dims,
+            distributed=True,
+            shuffle_seed=seed,
+        ),
     )
 
 

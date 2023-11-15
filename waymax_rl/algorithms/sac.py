@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax import linen
-from waymax.dataloader import simulator_state_generator
 
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
 from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
@@ -28,7 +27,7 @@ from waymax_rl.utils import (
     Transition,
     assert_is_replicated,
     init_training_state,
-    make_dataset_config,
+    make_simulator_state_generator,
     save_params,
     synchronize_hosts,
     unpmap,
@@ -138,14 +137,12 @@ def train(
     # Environment
     env = environment
 
-    dataset = make_dataset_config(
+    data_generator = make_simulator_state_generator(
         path=args.path_dataset,
         max_num_objects=args.max_num_objects,
         batch_dims=(args.num_episode_per_epoch, args.num_envs),
         seed=args.seed,
     )
-
-    data_generator = simulator_state_generator(dataset)
     sample_simulator_state = env.reset(next(data_generator)).simulator_state
 
     scenario_length = sample_simulator_state.remaining_timesteps
@@ -280,16 +277,7 @@ def train(
             # Rollout step
             policy = make_policy(training_state.actor_params)
             next_env_state, transition = policy_step(env, env_state, policy, experience_key)
-
-            mask = next_env_state.mask
-            timesteps = next_env_state.timesteps
-            episode_reward = next_env_state.episode_reward
-
-            buffer_state = replay_buffer.insert(buffer_state, transition, mask)
-
-            # TODO: Temporary fix to avoid having to deal with the mask
-            # Replace new state with old state for masked environments
-            # next_simulator_state = jax.tree_util.tree_map(lambda x, y: jnp.where(mask, x, y), simulator_state, next_simulator_state)
+            buffer_state = replay_buffer.insert(buffer_state, transition, next_env_state.mask)
 
             # Learning step
             next_buffer_state, transitions = replay_buffer.sample(buffer_state)
@@ -327,14 +315,14 @@ def train(
 
         key, local_key = jax.random.split(key)
 
-        (training_state, buffer_state, _), metrics = jax.lax.scan(
+        (final_training_state, final_buffer_state, _), metrics = jax.lax.scan(
             run_episode,
             (training_state, buffer_state, local_key),
             batch_simulator_state,
             length=args.num_episode_per_epoch,
         )
 
-        return training_state, buffer_state, metrics
+        return final_training_state, final_buffer_state, metrics
 
     def prefill_replay_buffer(
         batch_simulator_state,
@@ -348,9 +336,7 @@ def train(
             step_key, next_key = jax.random.split(key)
 
             next_env_state, transition = random_step(env, env_state, action_shape, step_key)
-            mask = next_env_state.mask
-
-            next_buffer_state = replay_buffer.insert(buffer_state, transition, mask)
+            next_buffer_state = replay_buffer.insert(buffer_state, transition, next_env_state.mask)
 
             return (next_env_state, next_buffer_state, next_key), None
 
@@ -367,19 +353,19 @@ def train(
 
             return (next_buffer_state, next_key), None
 
-        buffer_state, _ = jax.lax.scan(
+        final_buffer_state, _ = jax.lax.scan(
             run_episode,
             (buffer_state, local_key),
             batch_simulator_state,
             length=args.num_episode_per_epoch,
         )[0]
 
-        return buffer_state
+        return final_buffer_state
 
     run_epoch = jax.pmap(run_epoch, axis_name="batch")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
-    rng, training_key, rb_key = jax.random.split(rng, 3)
+    rng, training_key, rb_key, prefill_key = jax.random.split(rng, 4)
 
     training_state = init_training_state(
         key=training_key,
@@ -392,7 +378,6 @@ def train(
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
     # Create and initialize the replay buffer
-    rng, prefill_key = jax.random.split(rng)
     prefill_keys = jax.random.split(prefill_key, num_devices)
 
     print("shape check".center(50, "="))
