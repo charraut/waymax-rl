@@ -4,7 +4,7 @@ import pickle
 from argparse import ArgumentParser
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple, TypeVar
-
+from waymax.config import DatasetConfig, DataFormat
 import flax
 import jax
 import jax.numpy as jnp
@@ -71,6 +71,18 @@ def init_training_state(
     )
 
     return jax.device_put_replicated(training_state, jax.local_devices()[:num_devices])
+
+
+def make_dataset_config(path: str, max_num_objects: int, batch_dims: tuple, seed: int):
+    return DatasetConfig(
+        path=path,
+        max_num_rg_points=20000,
+        data_format=DataFormat.TFRECORD,
+        max_num_objects=max_num_objects,
+        batch_dims=batch_dims,
+        distributed=True,
+        shuffle_seed=seed,
+    )
 
 
 def load_params(path: str) -> Any:

@@ -10,20 +10,21 @@ from tensorboardX import SummaryWriter
 from waymax_rl.algorithms.sac import train
 from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
+from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=100)
     parser.add_argument("--num_envs", type=int, default=4)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--num_episode_per_epoch", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_episode_per_epoch", type=int, default=1)
     parser.add_argument("--num_save", type=int, default=1)
     parser.add_argument("--max_num_objects", type=int, default=16)
-    parser.add_argument("--trajectory_length", type=int, default=3)
+    parser.add_argument("--trajectory_length", type=int, default=2)
     # SAC256
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
@@ -33,8 +34,8 @@ def parse_args():
     parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256))
     parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=500_000)
-    parser.add_argument("--learning_start", type=int, default=10000)
+    parser.add_argument("--buffer_size", type=int, default=8_000)
+    parser.add_argument("--learning_start", type=int, default=20000)
     # Misc
     parser.add_argument("--path_dataset", type=str, default=None)
     parser.add_argument("--seed", type=int, default=0)
@@ -112,6 +113,9 @@ if __name__ == "__main__":
     print("parameters".center(50, "="))
     for key, value in vars(_args).items():
         print(f"{key}: {value}")
+
+    if _args.path_dataset is None:
+        _args.path_dataset = WOD_1_0_0_TRAINING_BUCKET
 
     env = create_bicycle_env(
         path_dataset=_args.path_dataset,

@@ -50,7 +50,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         if reward_fn is not None:
             self.reward = reward_fn
 
-        self._keep_mask = None
+        self._mask_env = None
         self._timesteps = None
 
     def observation_spec(self, state: SimulatorState):
@@ -60,7 +60,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
 
     def reset(self, state: SimulatorState) -> SimulatorState:
         """Resets the environment."""
-        self._keep_mask = jnp.ones(state.batch_dims[-1], dtype=jnp.bool_)
+        self._mask_env = jnp.ones(state.batch_dims[-1], dtype=jnp.bool_)
 
         simulator_state = super().reset(state)
         self._timesteps = jnp.full(state.batch_dims[-1], simulator_state.timestep)
@@ -129,19 +129,19 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         done = jnp.logical_or(termination, truncation)
 
         # Put mask at True if episode is done
-        self._keep_mask = jnp.logical_and(self._keep_mask, jnp.logical_not(done))
+        self._mask_env = jnp.logical_and(self._mask_env, jnp.logical_not(done))
 
         # Determine the flag factor
         flag = jnp.logical_not(termination)
 
         metrics = self.metrics(next_state)
 
-        self._timesteps = jnp.where(self._keep_mask, self._timesteps, self._timesteps + 1)
-
-        masked_envs = jnp.logical_not(self._keep_mask)
+        self._timesteps = jnp.where(
+            self._mask_env, jnp.full(state.batch_dims[-1], next_state.timestep), self._timesteps
+        )
 
         info = {
-            "masked_envs": masked_envs,
+            "mask_env": self._mask_env,
             "timesteps": self._timesteps,
             "truncation": truncation,
             "termination": termination,

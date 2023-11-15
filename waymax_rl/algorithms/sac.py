@@ -6,9 +6,8 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax import linen
-from waymax.config import DataFormat, DatasetConfig
 from waymax.dataloader import simulator_state_generator
-
+from waymax.datatypes.operations import update_by_mask
 from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
 from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
 from waymax_rl.algorithms.utils.networks import (
@@ -33,6 +32,7 @@ from waymax_rl.utils import (
     save_params,
     synchronize_hosts,
     unpmap,
+    make_dataset_config,
 )
 
 
@@ -139,17 +139,11 @@ def train(
     # Environment
     env = environment
 
-    dataset = DatasetConfig(
-        path=WOD_1_0_0_TRAINING_BUCKET,
-        max_num_rg_points=20000,
-        data_format=DataFormat.TFRECORD,
+    dataset = make_dataset_config(
+        path=args.path_dataset,
         max_num_objects=args.max_num_objects,
-        batch_dims=(
-            args.num_episode_per_epoch,
-            args.num_envs,
-        ),
-        distributed=True,
-        shuffle_seed=args.seed,
+        batch_dims=(args.num_episode_per_epoch, args.num_envs),
+        seed=args.seed,
     )
 
     data_generator = simulator_state_generator(dataset)
@@ -287,13 +281,17 @@ def train(
             # Rollout step
             policy = make_policy(training_state.actor_params)
             next_simulator_state, transition, info = policy_step(env, simulator_state, policy, experience_key)
-            mask = info["masked_envs"]
+            mask = info["mask_env"]
+
+            jax.debug.print("simulator_state timesteps: {x}", x=simulator_state.timestep)
+            jax.debug.print("next_simulator_state timesteps: {x}", x=next_simulator_state.timestep)
+            jax.debug.print("info: {x}", x=info)
 
             buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
             # TODO: Temporary fix to avoid having to deal with the mask
             # Replace new state with old state for masked environments
-            # next_simulator_state = update_by_mask(simulator_state, next_simulator_state, mask)
+            # next_simulator_state = jax.tree_util.tree_map(lambda x, y: jnp.where(mask, x, y), simulator_state, next_simulator_state)
 
             # Learning step
             next_buffer_state, transitions = replay_buffer.sample(buffer_state)
@@ -343,10 +341,14 @@ def train(
 
         def run_random_step(carry, _x):
             simulator_state, buffer_state, key = carry
+            jax.debug.print("simulator_state timesteps: {x}", x=simulator_state.timestep)
             step_key, next_key = jax.random.split(key)
 
             next_simulator_state, transition, info = random_step(env, simulator_state, action_shape, step_key)
-            mask = info["masked_envs"]
+            mask = info["mask_env"]
+            jax.debug.print("simulator_state timesteps: {x}", x=simulator_state.timestep)
+            jax.debug.print("next_simulator_state timesteps: {x}", x=next_simulator_state.timestep)
+            jax.debug.print("info: {x}", x=info)
 
             next_buffer_state = replay_buffer.insert(buffer_state, transition, mask)
 
