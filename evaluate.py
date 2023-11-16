@@ -6,7 +6,7 @@ import mediapy
 from jax.random import PRNGKey, split
 from waymax.visualization import plot_simulator_state
 
-from waymax_rl.algorithms.sac import make_sac_networks
+from waymax_rl.algorithms.online_rl.sac import make_sac_networks
 from waymax_rl.algorithms.utils.networks import make_inference_fn
 from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.policy import policy_step, random_step

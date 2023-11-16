@@ -7,7 +7,7 @@ from functools import partial
 import jax
 from tensorboardX import SummaryWriter
 
-from waymax_rl.algorithms.sac import train
+from waymax_rl.algorithms.online_rl.sac import train
 from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
