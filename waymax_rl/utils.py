@@ -15,11 +15,11 @@ from waymax.dataloader import simulator_state_generator
 
 
 Params = Any
-PRNGKey = jnp.ndarray
-Metrics = Mapping[str, jnp.ndarray]
+PRNGKey = jax.Array
+Metrics = Mapping[str, jax.Array]
 NetworkType = TypeVar("NetworkType")
 ReplayBufferState = Any
-ActivationFn = Callable[[jnp.ndarray], jnp.ndarray]
+ActivationFn = Callable[[jax.Array], jax.Array]
 Initializer = Callable[..., Any]
 State = TypeVar("State")
 Sample = TypeVar("Sample")
@@ -28,12 +28,12 @@ Sample = TypeVar("Sample")
 class Transition(NamedTuple):
     """Container for a transition."""
 
-    observation: jnp.ndarray
-    action: jnp.ndarray
-    reward: jnp.ndarray
-    flag: jnp.ndarray
-    next_observation: jnp.ndarray
-    done: jnp.ndarray
+    observation: jax.Array
+    action: jax.Array
+    reward: jax.Array
+    flag: jax.Array
+    next_observation: jax.Array
+    done: jax.Array
 
 
 @flax.struct.dataclass
@@ -45,7 +45,7 @@ class TrainingState:
     critic_optimizer_state: optax.OptState
     critic_params: Params
     target_critic_params: Params
-    gradient_steps: jnp.ndarray
+    gradient_steps: jax.Array
 
 
 def init_training_state(
@@ -118,7 +118,7 @@ def _fingerprint(x: Any) -> float:
     return jax.tree_util.tree_reduce(lambda x, y: x + y, sums)
 
 
-def is_replicated(x: Any, axis_name: str) -> jnp.ndarray:
+def is_replicated(x: Any, axis_name: str) -> jax.Array:
     """Returns whether x is replicated.
 
     Should be called inside a function pmapped along 'axis_name'

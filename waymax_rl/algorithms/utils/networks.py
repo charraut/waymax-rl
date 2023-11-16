@@ -37,7 +37,7 @@ class MLP(linen.Module):
     bias: bool = True
 
     @linen.compact
-    def __call__(self, data: jnp.ndarray):
+    def __call__(self, data: jax.Array):
         hidden = data
         for i, hidden_size in enumerate(self.layer_sizes):
             hidden = linen.Dense(hidden_size, name=f"hidden_{i}", kernel_init=self.kernel_init, use_bias=self.bias)(
@@ -81,7 +81,7 @@ def make_critic_network(
         n_critics: int
 
         @linen.compact
-        def __call__(self, obs: jnp.ndarray, actions: jnp.ndarray):
+        def __call__(self, obs: jax.Array, actions: jax.Array):
             hidden = jnp.concatenate([obs, actions], axis=-1)
             res = []
             for _ in range(self.n_critics):

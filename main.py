@@ -22,13 +22,14 @@ os.environ["XLA_FLAGS"] = (
     "--xla_gpu_enable_highest_priority_async_stream=true "
 )
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
     parser.add_argument("--total_timesteps", type=int, default=7_864_320)
-    parser.add_argument("--num_envs", type=int, default=128)
-    parser.add_argument("--grad_updates_per_step", type=int, default=32)
+    parser.add_argument("--num_envs", type=int, default=8)
+    parser.add_argument("--grad_updates_per_step", type=int, default=8)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_episode_per_epoch", type=int, default=8)
     parser.add_argument("--num_save", type=int, default=1)

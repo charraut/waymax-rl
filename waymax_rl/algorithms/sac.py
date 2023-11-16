@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import optax
 from flax import linen
 
-from waymax_rl.algorithms.utils.buffers import ReplayBufferState, UniformSamplingQueue
+from waymax_rl.algorithms.utils.buffers import ReplayBuffer, ReplayBufferState
 from waymax_rl.algorithms.utils.distributions import NormalTanhDistribution, ParametricDistribution
 from waymax_rl.algorithms.utils.networks import (
     FeedForwardNetwork,
@@ -71,7 +71,7 @@ def make_sac_networks(
     )
 
 
-def make_losses(sac_network, gamma: float):
+def make_losses(sac_network, gamma: float, alpha: float):
     """Creates the SAC losses."""
 
     actor_network = sac_network.actor_network
@@ -82,17 +82,19 @@ def make_losses(sac_network, gamma: float):
         critic_params: Params,
         actor_params: Params,
         target_critic_params: Params,
-        alpha: float,
         transitions: Transition,
         key: PRNGKey,
-    ) -> jnp.ndarray:
+    ) -> jax.Array:
         critic_old_action = critic_network.apply(critic_params, transitions.observation, transitions.action)
         next_dist_params = actor_network.apply(actor_params, transitions.next_observation)
+
         next_action = parametric_action_distribution.sample_no_postprocessing(next_dist_params, key)
         next_log_prob = parametric_action_distribution.log_prob(next_dist_params, next_action)
         next_action = parametric_action_distribution.postprocess(next_action)
+
         next_critic = critic_network.apply(target_critic_params, transitions.next_observation, next_action)
         next_v = jnp.min(next_critic, axis=-1) - alpha * next_log_prob
+
         target_critic = jax.lax.stop_gradient(
             transitions.reward + transitions.flag * gamma * next_v,
         )
@@ -104,14 +106,15 @@ def make_losses(sac_network, gamma: float):
     def actor_loss(
         actor_params: Params,
         critic_params: Params,
-        alpha: float,
         transitions: Transition,
         key: PRNGKey,
-    ) -> jnp.ndarray:
+    ) -> jax.Array:
         dist_params = actor_network.apply(actor_params, transitions.observation)
+
         action = parametric_action_distribution.sample_no_postprocessing(dist_params, key)
         log_prob = parametric_action_distribution.log_prob(dist_params, action)
         action = parametric_action_distribution.postprocess(action)
+
         critic_action = critic_network.apply(critic_params, transitions.observation, action)
         min_critic = jnp.min(critic_action, axis=-1)
         actor_loss = alpha * log_prob - min_critic
@@ -184,7 +187,7 @@ def train(
     critic_optimizer = optax.adam(learning_rate=args.learning_rate)
 
     # Create Replay Buffer
-    replay_buffer = UniformSamplingQueue(
+    replay_buffer = ReplayBuffer(
         buffer_size=args.buffer_size // num_devices,
         batch_size=args.batch_size * args.grad_updates_per_step // num_devices,
         dummy_data_sample=Transition(
@@ -198,10 +201,10 @@ def train(
     )
 
     # Create losses and grad functions for SAC losses
-    alpha = args.alpha
     critic_loss, actor_loss = make_losses(
         sac_network=sac_network,
         gamma=args.gamma,
+        alpha=args.alpha,
     )
 
     actor_update = gradient_update_fn(
@@ -227,7 +230,6 @@ def train(
             training_state.critic_params,
             training_state.actor_params,
             training_state.target_critic_params,
-            alpha,
             transitions,
             key_critic,
             optimizer_state=training_state.critic_optimizer_state,
@@ -235,7 +237,6 @@ def train(
         actor_loss, actor_params, actor_optimizer_state = actor_update(
             training_state.actor_params,
             training_state.critic_params,
-            alpha,
             transitions,
             key_actor,
             optimizer_state=training_state.actor_optimizer_state,
