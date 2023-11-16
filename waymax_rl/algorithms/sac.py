@@ -262,6 +262,44 @@ def train(
         )
 
         return (new_training_state, key), metrics
+    
+    def prefill_replay_buffer(
+        batch_simulator_state,
+        buffer_state: ReplayBufferState,
+        key: jax.random.PRNGKey,
+    ):
+        key, local_key = jax.random.split(key)
+
+        def run_random_step(carry, _x):
+            env_state, buffer_state, key = carry
+            step_key, next_key = jax.random.split(key)
+
+            next_env_state, transition = random_step(env, env_state, action_shape, step_key)
+            next_buffer_state = replay_buffer.insert(buffer_state, transition, next_env_state.mask)
+
+            return (next_env_state, next_buffer_state, next_key), None
+
+        def run_episode(carry, simulator_state):
+            buffer_state, key = carry
+            init_env_state = env.reset(simulator_state)
+
+            _, next_buffer_state, next_key = jax.lax.scan(
+                run_random_step,
+                (init_env_state, buffer_state, key),
+                None,
+                length=scenario_length,
+            )[0]
+
+            return (next_buffer_state, next_key), None
+
+        final_buffer_state, _ = jax.lax.scan(
+            run_episode,
+            (buffer_state, local_key),
+            batch_simulator_state,
+            length=args.num_episode_per_epoch,
+        )[0]
+
+        return final_buffer_state
 
     def run_epoch(
         batch_simulator_state,
@@ -323,45 +361,9 @@ def train(
         )
 
         return final_training_state, final_buffer_state, metrics
+    
 
-    def prefill_replay_buffer(
-        batch_simulator_state,
-        buffer_state: ReplayBufferState,
-        key: jax.random.PRNGKey,
-    ):
-        key, local_key = jax.random.split(key)
-
-        def run_random_step(carry, _x):
-            env_state, buffer_state, key = carry
-            step_key, next_key = jax.random.split(key)
-
-            next_env_state, transition = random_step(env, env_state, action_shape, step_key)
-            next_buffer_state = replay_buffer.insert(buffer_state, transition, next_env_state.mask)
-
-            return (next_env_state, next_buffer_state, next_key), None
-
-        def run_episode(carry, simulator_state):
-            buffer_state, key = carry
-            init_env_state = env.reset(simulator_state)
-
-            _, next_buffer_state, next_key = jax.lax.scan(
-                run_random_step,
-                (init_env_state, buffer_state, key),
-                None,
-                length=scenario_length,
-            )[0]
-
-            return (next_buffer_state, next_key), None
-
-        final_buffer_state, _ = jax.lax.scan(
-            run_episode,
-            (buffer_state, local_key),
-            batch_simulator_state,
-            length=args.num_episode_per_epoch,
-        )[0]
-
-        return final_buffer_state
-
+    
     run_epoch = jax.pmap(run_epoch, axis_name="batch")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
@@ -415,20 +417,20 @@ def train(
         )
         training_metrics = jax.tree_util.tree_map(jnp.mean, training_metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), training_metrics)
+        epoch_training_time = perf_counter() - t
+
+        t = perf_counter()
         metrics = {
             "rollout/sps": int(num_steps_per_epoch / epoch_training_time),
             **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
         }
-        epoch_training_time = perf_counter() - t
-
-        t = perf_counter()
         params = unpmap(training_state.actor_params)
         # Log metrics
         if checkpoint_logdir and not epoch % save_freq:
             # Save current policy
             path = f"{checkpoint_logdir}/model_{current_step}.pkl"
             save_params(path, params)
-    
+
         epoch_log_time = perf_counter() - t
 
         current_step = epoch * num_steps_per_epoch
