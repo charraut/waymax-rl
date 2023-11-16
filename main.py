@@ -13,6 +13,16 @@ from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
 
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["XLA_FLAGS"] = (
+    "--xla_gpu_enable_triton_softmax_fusion=true "
+    "--xla_gpu_triton_gemm_any=True "
+    "--xla_gpu_enable_async_collectives=true "
+    "--xla_gpu_enable_latency_hiding_scheduler=true "
+    "--xla_gpu_enable_highest_priority_async_stream=true "
+)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 

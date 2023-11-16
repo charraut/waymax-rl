@@ -185,7 +185,7 @@ def train(
 
     # Create Replay Buffer
     replay_buffer = UniformSamplingQueue(
-        buffer_size=args.buffer_size,
+        buffer_size=args.buffer_size // num_devices,
         batch_size=args.batch_size * args.grad_updates_per_step // num_devices,
         dummy_data_sample=Transition(
             observation=jnp.zeros((obs_size,)),
@@ -262,7 +262,7 @@ def train(
         )
 
         return (new_training_state, key), metrics
-    
+
     def prefill_replay_buffer(
         batch_simulator_state,
         buffer_state: ReplayBufferState,
@@ -361,9 +361,7 @@ def train(
         )
 
         return final_training_state, final_buffer_state, metrics
-    
 
-    
     run_epoch = jax.pmap(run_epoch, axis_name="batch")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
