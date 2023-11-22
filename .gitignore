@@ -1,7 +1,17 @@
+# Compiled Python files
 __pycache__/
+
+# Virtual Environment
 venv/
+
+# IDE settings
+.vscode/
+
+# Jupyter Notebooks
+notebooks/
+
+# Project-specific directories
 runs/
 models/
 eval_scenarios/
 waymax_rl.egg-info/
-.vscode/
