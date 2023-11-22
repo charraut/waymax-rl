@@ -28,8 +28,8 @@ def parse_args():
 
     # Training
     parser.add_argument("--total_timesteps", type=int, default=7_864_320)
-    parser.add_argument("--num_envs", type=int, default=8)
-    parser.add_argument("--grad_updates_per_step", type=int, default=8)
+    parser.add_argument("--num_envs", type=int, default=4)
+    parser.add_argument("--grad_updates_per_step", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_episode_per_epoch", type=int, default=8)
     parser.add_argument("--num_save", type=int, default=1)
@@ -41,10 +41,10 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(1024, 1024, 512, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(1024, 1024, 512, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(512, 512, 512, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(512, 512, 512, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=1048576)
+    parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--learning_start", type=int, default=8192)
     # Misc
     parser.add_argument("--path_dataset", type=str, default=None)
