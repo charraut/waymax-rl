@@ -64,18 +64,19 @@ def setup_debugging(args):
         os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
         jax.config.update("jax_platform_name", "cpu")
 
-    args.total_timesteps = 100_000
-    args.log_freq = 100
-    args.num_save = 1
-    args.buffer_size = 10_000
-    args.learning_start = 100
-    args.num_envs = 4
-    args.batch_size = 16
-    args.max_num_objects = 8
-    args.trajectory_length = 1
+    args.total_timesteps = 80_000
+    args.num_envs = 1
     args.grad_updates_per_step = 1
+    args.batch_size = 16
+    args.num_episode_per_epoch = 1
+    args.num_save = 1
+    args.max_num_objects = 16
+    args.trajectory_length = 2
+    # SAC
     args.actor_layers = (32, 32)
     args.critic_layers = (32, 32)
+    args.buffer_size = 1_000
+    args.learning_start = 800
 
     return args
 
