@@ -12,7 +12,7 @@ def normalize_by_meters(data: jax.Array, meters: int = 5) -> jax.Array:
 
 def obs_vectorize(state: SimulatorState, trajectory_length: int = 1, normalize: bool = True) -> jax.Array:
     batch_dims = state.batch_dims
-    observation = sdc_observation_from_state(state, obs_num_steps=trajectory_length, roadgraph_top_k=200)
+    observation = sdc_observation_from_state(state, obs_num_steps=trajectory_length, roadgraph_top_k=250)
 
     # Extract all the data from the observation
     trajectory = observation.trajectory.xy
@@ -43,6 +43,6 @@ def obs_bev(state: SimulatorState, trajectory_length: int = 1, size_obs: int = 2
     }
 
     bev = plot_observation(observation, obj_idx=0, viz_config=viz_config, batch_idx=1)
-    bev = jnp.transpose(bev, (2, 0, 1))
+    bev = jnp.mean(bev, axis=-1)
 
     return bev

@@ -32,8 +32,10 @@ def parse_args():
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_episode_per_epoch", type=int, default=16)
-    parser.add_argument("--num_save", type=int, default=1)
-    parser.add_argument("--max_num_objects", type=int, default=32)
+    parser.add_argument("--num_save", type=int, default=20)
+    parser.add_argument("--num_eval", type=int, default=0)
+    parser.add_argument("--num_scenario_per_eval", type=int, default=8)
+    parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=3)
     # SAC
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -41,8 +43,8 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(512, 512, 512, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(512, 512, 512, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(512, 512, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(512, 512, 256))
     # Replay Buffer
     parser.add_argument("--buffer_size", type=int, default=327_680)
     parser.add_argument("--learning_start", type=int, default=8192)
@@ -132,13 +134,6 @@ if __name__ == "__main__":
         max_num_objects=_args.max_num_objects,
         trajectory_length=_args.trajectory_length,
     )
-
-    # eval_env = create_bicycle_env_eval(
-    #     path_dataset=_args.path_dataset,
-    #     max_num_objects=_args.max_num_objects,
-    #     num_envs=_args.num_envs,
-    #     trajectory_length=_args.trajectory_length,
-    # )
 
     train(
         environment=env,

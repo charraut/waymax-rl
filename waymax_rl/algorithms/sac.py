@@ -126,7 +126,6 @@ def make_losses(sac_network, gamma: float, alpha: float):
 
 def train(
     environment: WaymaxBaseEnv,
-    eval_environment: WaymaxBaseEnv,
     args,
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     checkpoint_logdir: str | None = None,
@@ -146,6 +145,16 @@ def train(
         batch_dims=(args.num_episode_per_epoch, args.num_envs),
         seed=args.seed,
     )
+
+    if args.num_eval:
+        data_generator_eval = make_simulator_state_generator(
+            path="gs://waymo_open_dataset_motion_v_1_0_0/uncompressed/tf_example/validation/validation_tfexample.tfrecord@150",
+            max_num_objects=args.max_num_objects,
+            batch_dims=(args.num_scenario_per_eval, 1),
+            seed=args.seed,
+        )
+        eval_scenario = next(data_generator_eval)
+
     sample_simulator_state = env.reset(next(data_generator)).simulator_state
 
     num_epoch = args.total_timesteps // args.num_episode_per_epoch
@@ -356,7 +365,45 @@ def train(
 
         return training_state, buffer_state, metrics
 
+    def run_evaluation(batch_simulator_state, training_state: TrainingState):
+        policy = make_policy(training_state.actor_params, deterministic=True)
+
+        def run_step(env_state):
+            env_state, _ = policy_step(env, env_state, policy, None)
+
+            return env_state
+
+        def run_episode(_carry, simulator_state):
+            def cond_fn(env_state):
+                return jnp.any(env_state.mask)
+
+            env_state = jax.lax.while_loop(
+                cond_fn,
+                run_step,
+                env.reset(simulator_state),
+            )
+
+            metrics = {
+                "eval/episode_reward": env_state.episode_reward,
+                "eval/episode_length": env_state.timesteps,
+                **{f"eval/{name}": value for name, value in env_state.metrics.items()},
+            }
+
+            metrics = jax.tree_util.tree_map(jnp.mean, metrics)
+
+            return (), metrics
+
+        _, metrics = jax.lax.scan(
+            run_episode,
+            (),
+            batch_simulator_state,
+            length=args.num_scenario_per_eval,
+        )
+
+        return metrics
+
     run_epoch = jax.pmap(run_epoch, axis_name="batch")
+    run_evaluation = jax.pmap(run_evaluation, axis_name="batch")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
     rng, training_key, rb_key = jax.random.split(rng, 3)
@@ -440,6 +487,12 @@ def train(
         print(f"-> Training time : {epoch_training_time:.2f}s")
         print(f"-> Log time      : {epoch_log_time:.2f}s")
         progress_fn(current_step, metrics)
+
+        if args.num_eval and not epoch % args.num_eval:
+            eval_metrics = run_evaluation(eval_scenario, training_state)
+            eval_metrics = jax.tree_util.tree_map(jnp.mean, eval_metrics)
+            jax.tree_util.tree_map(lambda x: x.block_until_ready(), eval_metrics)
+            progress_fn(current_step, eval_metrics)
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
