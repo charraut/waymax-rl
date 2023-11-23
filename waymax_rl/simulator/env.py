@@ -50,7 +50,7 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         mask = jnp.ones(simulator_state.batch_dims[-1], dtype=jnp.bool_)
         timesteps = jnp.full(simulator_state.batch_dims[-1], simulator_state.timestep)
         episode_reward = jnp.zeros(simulator_state.batch_dims[-1])
-        metrics = {key: 0 for key in self.metrics(simulator_state).keys()}
+        metrics = {key: 0 for key in self.metrics(simulator_state)}
 
         env_state = EnvState(
             simulator_state=simulator_state,

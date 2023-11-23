@@ -48,6 +48,7 @@ class TrainingState:
     critic_params: Params
     target_critic_params: Params
     gradient_steps: jax.Array
+    env_steps: jax.Array
 
 
 def init_training_state(
@@ -72,6 +73,7 @@ def init_training_state(
         critic_params=critic_params,
         target_critic_params=critic_params,
         gradient_steps=jnp.zeros(()),
+        env_steps=jnp.zeros(()),
     )
 
     return jax.device_put_replicated(training_state, jax.local_devices()[:num_devices])

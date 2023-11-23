@@ -148,22 +148,13 @@ def train(
     )
     sample_simulator_state = env.reset(next(data_generator)).simulator_state
 
-    scenario_length = sample_simulator_state.remaining_timesteps
     num_epoch = args.total_timesteps // args.num_episode_per_epoch
-    num_steps_per_epoch = scenario_length * args.num_episode_per_epoch * args.num_envs
     save_freq = num_epoch // args.num_save
-
-    print("num_prefill_actor_steps", args.num_episode_per_epoch * scenario_length)
-    print("num_epoch", num_epoch)
-    print("num_episode_per_epoch", args.num_episode_per_epoch)
-    print("scenario_length", scenario_length)
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec(sample_simulator_state)
     action_size = env.action_spec().data.shape[0]
     action_shape = (args.num_envs, action_size)
-    print(f"observation size: {obs_size}")
-    print(f"action size: {action_size}")
 
     print("device".center(50, "="))
     print(f"num_devices: {num_devices}")
@@ -260,6 +251,7 @@ def train(
             critic_params=critic_params,
             target_critic_params=new_target_critic_params,
             gradient_steps=training_state.gradient_steps + 1,
+            env_steps=training_state.env_steps,
         )
 
         return (new_training_state, key), metrics
@@ -336,7 +328,13 @@ def train(
             env_state = env.reset(simulator_state)
 
             training_state, env_state, buffer_state, key = jax.lax.while_loop(
-                cond_fn, run_step, (training_state, env_state, buffer_state, key),
+                cond_fn,
+                run_step,
+                (training_state, env_state, buffer_state, key),
+            )
+
+            training_state = training_state.replace(
+                env_steps=training_state.env_steps + jnp.sum(env_state.timesteps),
             )
 
             metrics = {
@@ -361,7 +359,7 @@ def train(
     run_epoch = jax.pmap(run_epoch, axis_name="batch")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="batch")
 
-    rng, training_key, rb_key, prefill_key = jax.random.split(rng, 4)
+    rng, training_key, rb_key = jax.random.split(rng, 3)
 
     training_state = init_training_state(
         key=training_key,
@@ -371,28 +369,33 @@ def train(
         critic_optimizer=critic_optimizer,
     )
 
+    # Create and initialize the replay buffer
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
-    # Create and initialize the replay buffer
-    prefill_keys = jax.random.split(prefill_key, num_devices)
+    while buffer_state.sample_position < args.learning_start:
+        rng, prefill_key = jax.random.split(rng)
+        prefill_keys = jax.random.split(prefill_key, num_devices)
+
+        buffer_state = prefill_replay_buffer(
+            next(data_generator),
+            buffer_state,
+            prefill_keys,
+        )
 
     print("shape check".center(50, "="))
+    print("num_epoch", num_epoch)
+    print("num_episode_per_epoch", args.num_episode_per_epoch)
+    print(f"observation size: {obs_size}")
+    print(f"action size: {action_size}")
     print("buffer", buffer_state.data.shape)
     print("simulator", sample_simulator_state.shape)
-    print("prefill_keys", prefill_keys.shape)
-
-    buffer_state = prefill_replay_buffer(
-        next(data_generator),
-        buffer_state,
-        prefill_keys,
-    )
-
-    # Main training loop
-    current_step = 0
     print(f"-> Pre-training: {perf_counter() - start_train_func:.2f}s")
     print("training".center(50, "="))
 
     time_training = perf_counter()
+
+    # Main training loop
+    current_step = 0
 
     for epoch in range(num_epoch):
         rng, epoch_key = jax.random.split(rng)
@@ -414,11 +417,16 @@ def train(
         epoch_training_time = perf_counter() - t
 
         t = perf_counter()
+        new_current_step = int(unpmap(training_state.env_steps))
+        num_steps_done = new_current_step - current_step
+        current_step = new_current_step
+
         metrics = {
-            "rollout/sps": int(num_steps_per_epoch / epoch_training_time),
+            "rollout/sps": int(num_steps_done / epoch_training_time),
             **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
         }
         params = unpmap(training_state.actor_params)
+
         # Log metrics
         if checkpoint_logdir and not epoch % save_freq:
             # Save current policy
@@ -427,7 +435,6 @@ def train(
 
         epoch_log_time = perf_counter() - t
 
-        current_step = epoch * num_steps_per_epoch
         print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
         print(f"-> Data time     : {epoch_data_time:.2f}s")
         print(f"-> Training time : {epoch_training_time:.2f}s")

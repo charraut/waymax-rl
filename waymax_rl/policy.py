@@ -63,8 +63,6 @@ def random_step(
     - state: The new state of the simulator after the step.
     - transition: A Transition object containing details of the step.
     """
-    observation = env.observe(env_state.simulator_state)
-
     # Generating actions within the specified bounds
     actions = jax.random.uniform(key=key, shape=action_shape, minval=action_bounds[0], maxval=action_bounds[1])
 
