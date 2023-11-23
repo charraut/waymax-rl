@@ -5,14 +5,14 @@ from waymax.datatypes.observation import sdc_observation_from_state
 from waymax.visualization import plot_observation
 
 
-def normalize_by_meters(data: jax.Array, meters: int = 20) -> jax.Array:
+def normalize_by_meters(data: jax.Array, meters: int = 5) -> jax.Array:
     data = jnp.clip(data, -meters, meters)
     return data / meters
 
 
 def obs_vectorize(state: SimulatorState, trajectory_length: int = 1, normalize: bool = True) -> jax.Array:
     batch_dims = state.batch_dims
-    observation = sdc_observation_from_state(state, obs_num_steps=trajectory_length)
+    observation = sdc_observation_from_state(state, obs_num_steps=trajectory_length, roadgraph_top_k=200)
 
     # Extract all the data from the observation
     trajectory = observation.trajectory.xy

@@ -56,26 +56,39 @@ class ReplayBuffer:
                 f"doesn't match the expected value ({self._data_shape})",
             )
 
-        # Flatten the samples
-        _samples = self._flatten_fn(samples)
+        # # Flatten the samples
+        # _samples = self._flatten_fn(samples)
 
-        # Padded indices of the mask elements
-        samples_size = jnp.sum(mask)
-        mask_indices = jnp.where(mask, size=len(mask), fill_value=len(mask))
+        # # Padded indices of the mask elements
+        # samples_size = jnp.sum(mask)
+        # mask_indices = jnp.where(mask, size=len(mask), fill_value=len(mask))
+
+        # # Current buffer state
+        # data = buffer_state.data
+        # insert_idx = buffer_state.insert_position
+        # sample_idx = buffer_state.sample_position
+
+        # # Create a copy of the buffer with samples inserted at insert_idx
+        # data_indices = (insert_idx + jnp.arange(len(mask))) % self._size
+        # update_mask = jnp.arange(len(mask))[:, None] < samples_size
+
+        # # Update the buffer state
+        # data = data.at[data_indices].set(jnp.where(update_mask, _samples[mask_indices], data[data_indices]))
+        # insert_idx = (insert_idx + samples_size) % self._size
+        # sample_idx = jnp.minimum(sample_idx + samples_size, self._size)
+
+        # Flatten the samples
+        new_samples = self._flatten_fn(samples)
+        samples_size = len(new_samples)
 
         # Current buffer state
         data = buffer_state.data
         insert_idx = buffer_state.insert_position
-        sample_idx = buffer_state.sample_position
 
-        # Create a copy of the buffer with samples inserted at insert_idx
-        data_indices = (insert_idx + jnp.arange(len(mask))) % self._size
-        update_mask = jnp.arange(len(mask))[:, None] < samples_size
-
-        # Update the buffer state
-        data = data.at[data_indices].set(jnp.where(update_mask, _samples[mask_indices], data[data_indices]))
+        # Update the buffer and the control numbers
+        data = jax.lax.dynamic_update_slice_in_dim(data, new_samples, insert_idx, axis=0)
         insert_idx = (insert_idx + samples_size) % self._size
-        sample_idx = jnp.minimum(sample_idx + samples_size, self._size)
+        sample_idx = jnp.minimum(buffer_state.sample_position + samples_size, self._size)
 
         return buffer_state.replace(
             data=data,

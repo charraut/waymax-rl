@@ -9,6 +9,8 @@ from waymax.datatypes import Action, SimulatorState
 from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 
+from waymax_rl.utils import Transition
+
 
 @chex.dataclass
 class EnvState:
@@ -16,29 +18,7 @@ class EnvState:
     timesteps: jax.Array
     mask: jax.Array
     episode_reward: jax.Array
-
-
-@chex.dataclass(frozen=True)
-class EpisodeSlice:
-    """Container class for Waymax transitions.
-
-    Attributes:
-      simulator_state: The current simulation state of shape (num_envs,).
-      observation: The current observation of shape (num_envs, ...).
-      reward: The reward obtained in the current transition of shape (num_envs,).
-      done: A boolean array denoting the end of an episode of shape (num_envs,).
-      flag: An array of flag values of shape (num_envs,).
-      metrics: Optional dictionary of metrics.
-      info: Optional dictionary of arbitrary logging information.
-    """
-
-    reward: jax.Array
-    done: jax.Array
-    flag: jax.Array
-    next_env_state: EnvState
-    next_observation: jax.Array
     metrics: dict[str, Any] = struct.field(default_factory=dict)
-    info: dict[str, Any] = struct.field(default_factory=dict)
 
 
 class WaymaxBaseEnv(PlanningAgentEnvironment):
@@ -70,11 +50,14 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         mask = jnp.ones(simulator_state.batch_dims[-1], dtype=jnp.bool_)
         timesteps = jnp.full(simulator_state.batch_dims[-1], simulator_state.timestep)
         episode_reward = jnp.zeros(simulator_state.batch_dims[-1])
+        metrics = {key: 0 for key in self.metrics(simulator_state).keys()}
+
         env_state = EnvState(
             simulator_state=simulator_state,
             timesteps=timesteps,
             mask=mask,
             episode_reward=episode_reward,
+            metrics=metrics,
         )
 
         return env_state
@@ -110,8 +93,8 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             max_num_objects=max_num_objects,
             rewards=LinearCombinationRewardConfig(
                 rewards={
-                    "overlap": -10.0,
-                    "offroad": -10.0,
+                    "overlap": -1.0,
+                    "offroad": -1.0,
                 },
             ),
         )
@@ -123,7 +106,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             reward_fn,
         )
 
-    def step(self, env_state: EnvState, action: jax.Array) -> EpisodeSlice:
+    def step(self, env_state: EnvState, action: jax.Array) -> Transition:
         """Take a step in the environment."""
 
         # Validate and wrap the action
@@ -154,13 +137,14 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             timesteps=timesteps,
             mask=mask,
             episode_reward=episode_reward,
+            metrics=metrics,
         )
 
-        return EpisodeSlice(
+        return next_env_state, Transition(
+            observation=self.observe(current_simulator_state),
+            action=action,
             reward=reward,
             flag=flag,
-            done=termination,
-            next_env_state=next_env_state,
             next_observation=next_obs,
-            metrics=metrics,
+            done=done,
         )

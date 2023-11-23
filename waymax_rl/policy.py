@@ -3,8 +3,6 @@ from typing import TYPE_CHECKING
 import jax
 import jax.numpy as jnp
 
-from waymax_rl.utils import Transition
-
 
 if TYPE_CHECKING:
     from waymax.datatypes import SimulatorState
@@ -39,19 +37,9 @@ def policy_step(
     actions = policy(observation, key)
 
     # Apply the actions to the environment and get the resulting slice of the episode
-    episode_slice = env.step(env_state, actions)
+    env_state, transition = env.step(env_state, actions)
 
-    # Create a transition object to encapsulate the step information
-    transition = Transition(
-        observation=observation,
-        action=actions,
-        reward=episode_slice.reward,
-        flag=episode_slice.flag,
-        next_observation=episode_slice.next_observation,
-        done=episode_slice.done,
-    )
-
-    return episode_slice.next_env_state, transition
+    return env_state, transition
 
 
 def random_step(
@@ -79,18 +67,10 @@ def random_step(
 
     # Generating actions within the specified bounds
     actions = jax.random.uniform(key=key, shape=action_shape, minval=action_bounds[0], maxval=action_bounds[1])
-    episode_slice = env.step(env_state, actions)
 
-    transition = Transition(
-        observation=observation,
-        action=actions,
-        reward=episode_slice.reward,
-        flag=episode_slice.flag,
-        next_observation=episode_slice.next_observation,
-        done=episode_slice.done,
-    )
+    env_state, transition = env.step(env_state, actions)
 
-    return episode_slice.next_env_state, transition
+    return env_state, transition
 
 
 def rollout(sim_state: "SimulatorState", env: "WaymaxBaseEnv", policy: callable) -> tuple:
