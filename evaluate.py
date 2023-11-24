@@ -1,25 +1,25 @@
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from pathlib import Path
 from random import randint
 
 import mediapy
+import jax
 from jax.random import PRNGKey, split
 from waymax.visualization import plot_simulator_state
 
 from waymax_rl.algorithms.sac import make_sac_networks
 from waymax_rl.algorithms.utils.networks import make_inference_fn
-from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
+from waymax_rl.constants import WOD_1_1_0_TRAINING_BUCKET, WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import load_args, load_params
+from waymax_rl.utils import make_simulator_state_generator_eval
 
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-
-
-def load_model(env, args, model_path):
-    obs_size = env.observation_spec()
+def load_model(env, evaluation_states, args, model_path):
+    obs_size = env.observation_spec(evaluation_states)
     action_size = env.action_spec().data.shape[0]
 
     sac_network = make_sac_networks(
@@ -39,34 +39,26 @@ def load_model(env, args, model_path):
     return policy, action_shape
 
 
-def random_state(env):
-    for _ in range(randint(1, 10)):
-        sim_state = env.reset()
-
-    return sim_state
-
-
-def eval_policy(env, args, model_path, run_path, nb_episodes=5, render=False):
+def eval_policy(env, args, scenarios, model_path, run_path, render=False):
     rng = PRNGKey(args.seed)
     rng, key = split(rng)
 
-    sim_state = env.init(seed=randint(0, 1000))
+    evaluation_states = env.reset(scenarios).simulator_state
 
     if model_path:
-        policy, action_shape = load_model(env, args, model_path)
+        policy, action_shape = load_model(env, evaluation_states, args, model_path)
         infer_model = True
     else:
         policy = None
         infer_model = False
 
-    for i in range(nb_episodes):
-        sim_state = random_state(env)
+    for i in range(args.num_episode_per_epoch):
+        sim_state = env.reset(jax.tree_map(lambda x: x[i], scenarios))
         episode_reward, episode_images = run_episode(env, sim_state, policy, key, action_shape, infer_model)
 
         print("Cumulative reward of episode " + str(i) + " : ", episode_reward)
         if render:
             write_video(run_path, episode_images, i + 1)
-
 
 def run_episode(env, sim_state, policy, key, action_shape, infer_model):
     episode_images = []
@@ -76,10 +68,10 @@ def run_episode(env, sim_state, policy, key, action_shape, infer_model):
     _sim_state = sim_state
 
     while not done:
-        episode_images.append(plot_simulator_state(_sim_state, use_log_traj=False, batch_idx=1))
+        episode_images.append(plot_simulator_state(_sim_state.simulator_state, use_log_traj=False, batch_idx=0))
 
         if infer_model:
-            _sim_state, transition, _ = policy_step(env, _sim_state, policy)
+            _sim_state, transition = policy_step(env, _sim_state, policy)
         else:
             key, subkey = split(key)
             _sim_state, transition = random_step(env, _sim_state, action_shape, subkey)
@@ -153,10 +145,20 @@ if __name__ == "__main__":
     model_path = get_model_path(selected_folder_path)
     args = load_args(selected_folder_path)
 
+    if args.path_dataset is None:
+        args.path_dataset = WOD_1_0_0_TRAINING_BUCKET
+
     env = create_bicycle_env(
-        path_dataset=WOD_1_0_0_TRAINING_BUCKET,
         max_num_objects=args.max_num_objects,
         trajectory_length=args.trajectory_length,
     )
 
-    eval_policy(env, args, model_path, run_path, nb_episodes=10, render=True)
+    data_generator = make_simulator_state_generator_eval(
+        path=args.path_dataset,
+        max_num_objects=args.max_num_objects,
+        batch_dims=(args.num_episode_per_epoch, args.num_envs),
+        seed=args.seed,
+    )
+    scenarios = next(data_generator)
+
+    eval_policy(env, args, scenarios, model_path, run_path, render=True)
