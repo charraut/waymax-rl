@@ -2,10 +2,11 @@ import jax
 import jax.numpy as jnp
 from waymax.datatypes import SimulatorState
 from waymax.datatypes.observation import sdc_observation_from_state
+from waymax.utils.geometry import transform_points
 from waymax.visualization import plot_observation
 
 
-def normalize_by_meters(data: jax.Array, meters: int = 5) -> jax.Array:
+def normalize_by_meters(data: jax.Array, meters: int = 20) -> jax.Array:
     data = jnp.clip(data, -meters, meters)
     return data / meters
 
@@ -28,6 +29,30 @@ def obs_vectorize(state: SimulatorState, trajectory_length: int = 1, normalize: 
     roadgraph_static_points = jnp.reshape(roadgraph_static_points, (*batch_dims, -1))
 
     return jnp.concatenate([trajectory, roadgraph_static_points], axis=len(batch_dims))
+
+
+def obs_target(state: SimulatorState, trajectory_length: int = 10, normalize: bool = False) -> jax.Array:
+    batch_dims = state.batch_dims
+    len_dims = len(batch_dims)
+
+    observation_sdc = sdc_observation_from_state(state)
+
+    _, sdc_idx = jax.lax.top_k(state.object_metadata.is_sdc, k=1)
+    sdc_log_xy = jnp.take_along_axis(state.log_trajectory.xy, sdc_idx[..., None, None], axis=len_dims)
+    sdc_pose2d = observation_sdc.pose2d.matrix
+
+    sdc_log_xy = transform_points(pts=sdc_log_xy, pose_matrix=sdc_pose2d)
+
+    target = jnp.full_like(sdc_log_xy, -1)
+    target = jnp.take(target, jnp.arange(trajectory_length), axis=-2)
+
+    sdc_log_xy = jax.lax.dynamic_slice_in_dim(sdc_log_xy, state.timestep, trajectory_length, axis=-2)
+    target = jax.lax.dynamic_update_slice_in_dim(target, sdc_log_xy, 0, axis=-2)
+
+    if normalize:
+        target = normalize_by_meters(target)
+
+    return jnp.reshape(target, (*batch_dims, -1))
 
 
 def obs_bev(state: SimulatorState, trajectory_length: int = 1, size_obs: int = 20, px_per_meter: int = 2) -> jax.Array:

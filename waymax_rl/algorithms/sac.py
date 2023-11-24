@@ -146,19 +146,18 @@ def train(
         seed=args.seed,
     )
 
-    if args.num_eval:
-        data_generator_eval = make_simulator_state_generator(
-            path="gs://waymo_open_dataset_motion_v_1_0_0/uncompressed/tf_example/validation/validation_tfexample.tfrecord@150",
-            max_num_objects=args.max_num_objects,
-            batch_dims=(args.num_scenario_per_eval, 1),
-            seed=args.seed,
-        )
-        eval_scenario = next(data_generator_eval)
+    # if args.num_eval:
+    #     data_generator_eval = make_simulator_state_generator(
+    #         path="gs://waymo_open_dataset_motion_v_1_0_0/uncompressed/tf_example/validation/validation_tfexample.tfrecord@150",
+    #         max_num_objects=args.max_num_objects,
+    #         batch_dims=(args.num_scenario_per_eval, 1),
+    #         seed=args.seed,
+    #     )
+    #     eval_scenario = next(data_generator_eval)
 
     sample_simulator_state = env.reset(next(data_generator)).simulator_state
 
     num_epoch = args.total_timesteps // args.num_episode_per_epoch
-    save_freq = num_epoch // args.num_save
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec(sample_simulator_state)
@@ -323,9 +322,6 @@ def train(
             )
             (training_state, _), sgd_metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
 
-            # Add metrics to env_state.metrics
-            # env_state.metrics = {**env_state.metrics, **sgd_metrics}
-
             return training_state, env_state, buffer_state, key
 
         def run_episode(carry, simulator_state):
@@ -352,6 +348,7 @@ def train(
                 **{f"rollout/{name}": value for name, value in env_state.metrics.items()},
             }
 
+            # Mean by steps
             metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
             return (training_state, buffer_state, key), metrics
@@ -443,18 +440,18 @@ def train(
 
     # Main training loop
     current_step = 0
+    batch_simulator_state = next(data_generator)
 
     for epoch in range(num_epoch):
         rng, epoch_key = jax.random.split(rng)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
         t = perf_counter()
-        simulator_state = next(data_generator)
         epoch_data_time = perf_counter() - t
 
         t = perf_counter()
         training_state, buffer_state, training_metrics = run_epoch(
-            simulator_state,
+            batch_simulator_state,
             training_state,
             buffer_state,
             epoch_keys,
@@ -470,12 +467,12 @@ def train(
 
         metrics = {
             "rollout/sps": int(num_steps_done / epoch_training_time),
-            **{f"{name}": jnp.round(value, 4) for name, value in training_metrics.items()},
+            **{f"{name}": value for name, value in training_metrics.items()},
         }
         params = unpmap(training_state.actor_params)
 
         # Log metrics
-        if checkpoint_logdir and not epoch % save_freq:
+        if checkpoint_logdir and not epoch % 500:
             # Save current policy
             path = f"{checkpoint_logdir}/model_{current_step}.pkl"
             save_params(path, params)
@@ -488,11 +485,11 @@ def train(
         print(f"-> Log time      : {epoch_log_time:.2f}s")
         progress_fn(current_step, metrics)
 
-        if args.num_eval and not epoch % args.num_eval:
-            eval_metrics = run_evaluation(eval_scenario, training_state)
-            eval_metrics = jax.tree_util.tree_map(jnp.mean, eval_metrics)
-            jax.tree_util.tree_map(lambda x: x.block_until_ready(), eval_metrics)
-            progress_fn(current_step, eval_metrics)
+        # if args.num_eval and not epoch % args.num_eval:
+        #     eval_metrics = run_evaluation(eval_scenario, training_state)
+        #     eval_metrics = jax.tree_util.tree_map(jnp.mean, eval_metrics)
+        #     jax.tree_util.tree_map(lambda x: x.block_until_ready(), eval_metrics)
+        #     progress_fn(current_step, eval_metrics)
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps

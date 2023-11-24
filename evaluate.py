@@ -1,21 +1,21 @@
 import os
+
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from pathlib import Path
-from random import randint
 
-import mediapy
 import jax
+import mediapy
 from jax.random import PRNGKey, split
 from waymax.visualization import plot_simulator_state
 
 from waymax_rl.algorithms.sac import make_sac_networks
 from waymax_rl.algorithms.utils.networks import make_inference_fn
-from waymax_rl.constants import WOD_1_1_0_TRAINING_BUCKET, WOD_1_0_0_TRAINING_BUCKET
+from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 from waymax_rl.policy import policy_step, random_step
 from waymax_rl.simulator import create_bicycle_env
-from waymax_rl.utils import load_args, load_params
-from waymax_rl.utils import make_simulator_state_generator_eval
+from waymax_rl.utils import load_args, load_params, make_simulator_state_generator_eval
 
 
 def load_model(env, evaluation_states, args, model_path):
@@ -60,6 +60,7 @@ def eval_policy(env, args, scenarios, model_path, run_path, render=False):
         if render:
             write_video(run_path, episode_images, i + 1)
 
+
 def run_episode(env, sim_state, policy, key, action_shape, infer_model):
     episode_images = []
     episode_reward = 0
@@ -68,7 +69,7 @@ def run_episode(env, sim_state, policy, key, action_shape, infer_model):
     _sim_state = sim_state
 
     while not done:
-        episode_images.append(plot_simulator_state(_sim_state.simulator_state, use_log_traj=False, batch_idx=0))
+        episode_images.append(plot_simulator_state(_sim_state.simulator_state, use_log_traj=True, batch_idx=0))
 
         if infer_model:
             _sim_state, transition = policy_step(env, _sim_state, policy)

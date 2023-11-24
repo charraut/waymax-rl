@@ -8,7 +8,7 @@ import jax
 from tensorboardX import SummaryWriter
 
 from waymax_rl.algorithms.sac import train
-from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
+from waymax_rl.constants import WOD_1_1_0_TRAINING_BUCKET
 from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
 
@@ -27,24 +27,24 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=7_864_320)
+    parser.add_argument("--total_timesteps", type=int, default=2_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--num_episode_per_epoch", type=int, default=16)
-    parser.add_argument("--num_save", type=int, default=20)
-    parser.add_argument("--num_eval", type=int, default=0)
+    parser.add_argument("--num_episode_per_epoch", type=int, default=32)
+    parser.add_argument("--num_save", type=int, default=100)
+    parser.add_argument("--num_eval", type=int, default=20)
     parser.add_argument("--num_scenario_per_eval", type=int, default=8)
     parser.add_argument("--max_num_objects", type=int, default=16)
-    parser.add_argument("--trajectory_length", type=int, default=3)
+    parser.add_argument("--trajectory_length", type=int, default=10)
     # SAC
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(512, 512, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(512, 512, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256))
     # Replay Buffer
     parser.add_argument("--buffer_size", type=int, default=327_680)
     parser.add_argument("--learning_start", type=int, default=8192)
@@ -128,12 +128,15 @@ if __name__ == "__main__":
         print(f"{key}: {value}")
 
     if _args.path_dataset is None:
-        _args.path_dataset = WOD_1_0_0_TRAINING_BUCKET
+        _args.path_dataset = WOD_1_1_0_TRAINING_BUCKET
 
     env = create_bicycle_env(
         max_num_objects=_args.max_num_objects,
         trajectory_length=_args.trajectory_length,
     )
+
+    if _args.num_envs > 1:
+        raise NotImplementedError("Multiple environments are not supported yet.")
 
     train(
         environment=env,

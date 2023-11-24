@@ -99,6 +99,24 @@ def make_simulator_state_generator(
     )
 
 
+def make_simulator_state_generator_eval(
+    max_num_objects: int,
+    seed: int = 0,
+    batch_dims: tuple = (),
+    path: str = WOD_1_0_0_TRAINING_BUCKET,
+):
+    return simulator_state_generator(
+        DatasetConfig(
+            path=path,
+            max_num_rg_points=20000,
+            data_format=DataFormat.TFRECORD,
+            max_num_objects=max_num_objects,
+            batch_dims=batch_dims,
+            shuffle_seed=seed,
+        ),
+    )
+
+
 def load_params(path: str) -> Any:
     with epath.Path(path).open("rb") as fin:
         buf = fin.read()
