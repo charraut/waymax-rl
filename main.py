@@ -137,7 +137,6 @@ if __name__ == "__main__":
 
     train(
         environment=env,
-        eval_environment=None,
         args=_args,
         progress_fn=progress,
         checkpoint_logdir=path_to_save_model,
