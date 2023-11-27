@@ -146,18 +146,16 @@ def train(
         seed=args.seed,
     )
 
-    # if args.num_eval:
-    #     data_generator_eval = make_simulator_state_generator(
-    #         path="gs://waymo_open_dataset_motion_v_1_0_0/uncompressed/tf_example/validation/validation_tfexample.tfrecord@150",
-    #         max_num_objects=args.max_num_objects,
-    #         batch_dims=(args.num_scenario_per_eval, 1),
-    #         seed=args.seed,
-    #     )
-    #     eval_scenario = next(data_generator_eval)
+    if args.eval_freq:
+        data_generator_eval = make_simulator_state_generator(
+            path="gs://waymo_open_dataset_motion_v_1_0_0/uncompressed/tf_example/validation/validation_tfexample.tfrecord@150",
+            max_num_objects=args.max_num_objects,
+            batch_dims=(args.num_scenario_per_eval, 1),
+            seed=args.seed,
+        )
+        eval_scenario = next(data_generator_eval)
 
     sample_simulator_state = env.reset(next(data_generator)).simulator_state
-
-    num_epoch = args.total_timesteps // args.num_episode_per_epoch
 
     # Observation & action spaces dimensions
     obs_size = env.observation_spec(sample_simulator_state)
@@ -427,12 +425,10 @@ def train(
         )
 
     print("shape check".center(50, "="))
-    print("num_epoch", num_epoch)
-    print("num_episode_per_epoch", args.num_episode_per_epoch)
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
-    print("buffer", buffer_state.data.shape)
-    print("simulator", sample_simulator_state.shape)
+    print(f"buffer shape: {buffer_state.data.shape}")
+    print(f"batch scenarios shape: {sample_simulator_state.shape}")
     print(f"-> Pre-training: {perf_counter() - start_train_func:.2f}s")
     print("training".center(50, "="))
 
@@ -440,13 +436,16 @@ def train(
 
     # Main training loop
     current_step = 0
-    batch_simulator_state = next(data_generator)
+    count_epoch = 0
 
-    for epoch in range(num_epoch):
+    while current_step < args.total_timesteps:
+        count_epoch += 1
+
         rng, epoch_key = jax.random.split(rng)
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
         t = perf_counter()
+        batch_simulator_state = next(data_generator)
         epoch_data_time = perf_counter() - t
 
         t = perf_counter()
@@ -469,39 +468,39 @@ def train(
             "rollout/sps": int(num_steps_done / epoch_training_time),
             **{f"{name}": value for name, value in training_metrics.items()},
         }
-        params = unpmap(training_state.actor_params)
 
-        # Log metrics
-        if checkpoint_logdir and not epoch % 500:
-            # Save current policy
+        # Save current policy
+        if checkpoint_logdir and not count_epoch % args.save_freq:
             path = f"{checkpoint_logdir}/model_{current_step}.pkl"
-            save_params(path, params)
+            save_params(path, unpmap(training_state.actor_params))
 
         epoch_log_time = perf_counter() - t
+
+        t = perf_counter()
+        # Evaluate current policy
+        if args.eval_freq and not count_epoch % args.eval_freq:
+            eval_metrics = run_evaluation(eval_scenario, training_state)
+            eval_metrics = jax.tree_util.tree_map(jnp.mean, eval_metrics)
+            jax.tree_util.tree_map(lambda x: x.block_until_ready(), eval_metrics)
+            progress_fn(current_step, eval_metrics)
+
+        epoch_eval_time = perf_counter() - t
 
         print(f"-> Step {current_step}/{args.total_timesteps} - {(current_step / args.total_timesteps) * 100:.2f}%")
         print(f"-> Data time     : {epoch_data_time:.2f}s")
         print(f"-> Training time : {epoch_training_time:.2f}s")
         print(f"-> Log time      : {epoch_log_time:.2f}s")
+        print(f"-> Eval time     : {epoch_eval_time:.2f}s")
         progress_fn(current_step, metrics)
-
-        # if args.num_eval and not epoch % args.num_eval:
-        #     eval_metrics = run_evaluation(eval_scenario, training_state)
-        #     eval_metrics = jax.tree_util.tree_map(jnp.mean, eval_metrics)
-        #     jax.tree_util.tree_map(lambda x: x.block_until_ready(), eval_metrics)
-        #     progress_fn(current_step, eval_metrics)
 
     print(f"-> Training took {perf_counter() - time_training:.2f}s")
     assert current_step >= args.total_timesteps
 
-    final_params = unpmap(training_state.actor_params)
-
+    # Save final policy
     if checkpoint_logdir:
         path = f"{checkpoint_logdir}/model_final.pkl"
-        save_params(path, final_params)
+        save_params(path, unpmap(training_state.actor_params))
 
     # If there was no mistakes the training_state should still be identical on all devices
     assert_is_replicated(training_state)
     synchronize_hosts()
-
-    return (make_policy, final_params)

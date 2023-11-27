@@ -1,5 +1,16 @@
-import argparse
 import os
+
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["XLA_FLAGS"] = (
+    "--xla_gpu_enable_triton_softmax_fusion=true "
+    "--xla_gpu_triton_gemm_any=True "
+    "--xla_gpu_enable_async_collectives=true "
+    "--xla_gpu_enable_latency_hiding_scheduler=true "
+    "--xla_gpu_enable_highest_priority_async_stream=true "
+)
+
+import argparse
 from collections.abc import Sequence
 from datetime import datetime
 from functools import partial
@@ -13,30 +24,20 @@ from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import save_args
 
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["XLA_FLAGS"] = (
-    "--xla_gpu_enable_triton_softmax_fusion=true "
-    "--xla_gpu_triton_gemm_any=True "
-    "--xla_gpu_enable_async_collectives=true "
-    "--xla_gpu_enable_latency_hiding_scheduler=true "
-    "--xla_gpu_enable_highest_priority_async_stream=true "
-)
-
-
 def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=2_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_episode_per_epoch", type=int, default=32)
-    parser.add_argument("--num_save", type=int, default=100)
-    parser.add_argument("--num_eval", type=int, default=20)
-    parser.add_argument("--num_scenario_per_eval", type=int, default=8)
     parser.add_argument("--max_num_objects", type=int, default=16)
     parser.add_argument("--trajectory_length", type=int, default=10)
+    parser.add_argument("--save_freq", type=int, default=100)
+    parser.add_argument("--eval_freq", type=int, default=20)
+    parser.add_argument("--num_scenario_per_eval", type=int, default=8)
     # SAC
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
@@ -71,7 +72,7 @@ def setup_debugging(args):
     args.grad_updates_per_step = 1
     args.batch_size = 16
     args.num_episode_per_epoch = 1
-    args.num_save = 1
+    args.save_freq = 1
     args.max_num_objects = 16
     args.trajectory_length = 2
     # SAC
