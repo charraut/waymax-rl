@@ -9,14 +9,14 @@ import jax.numpy as jnp
 import optax
 from flax import linen
 
-from waymax_rl.utils import ActivationFn, Initializer, Params, PRNGKey
+from waymax_rl.utils import ActivationFn, Initializer, Params
 
 
 class Policy(Protocol):
     def __call__(
         self,
         observation: jax.Array,
-        key: PRNGKey,
+        key: jax.random.PRNGKey,
     ) -> jax.Array:
         pass
 
@@ -108,7 +108,7 @@ def make_inference_fn(actor_critic_net):
     """Creates params and inference function."""
 
     def make_policy(params: Params, deterministic: bool = False) -> Policy:
-        def policy(observations: jax.Array, key_sample: PRNGKey = None) -> jax.Array:
+        def policy(observations: jax.Array, key_sample: jax.random.PRNGKey = None) -> jax.Array:
             logits = actor_critic_net.actor_network.apply(params, observations)
 
             if deterministic:

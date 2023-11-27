@@ -1,3 +1,5 @@
+# Code source: https://github.com/google/brax/blob/main/brax/training/distribution.py
+
 import abc
 
 import jax

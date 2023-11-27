@@ -52,15 +52,13 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         episode_reward = jnp.zeros(simulator_state.batch_dims[-1])
         metrics = {key: 0 for key in self.metrics(simulator_state)}
 
-        env_state = EnvState(
+        return EnvState(
             simulator_state=simulator_state,
             timesteps=timesteps,
             mask=mask,
             episode_reward=episode_reward,
             metrics=metrics,
         )
-
-        return env_state
 
     def termination(self, simulator_state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""

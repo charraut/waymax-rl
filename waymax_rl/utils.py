@@ -3,7 +3,7 @@ import json
 import pickle
 from argparse import ArgumentParser
 from collections.abc import Callable, Mapping
-from typing import Any, TypeVar
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -11,14 +11,9 @@ from etils import epath
 
 
 Params = Any
-PRNGKey = jax.Array
 Metrics = Mapping[str, jax.Array]
-NetworkType = TypeVar("NetworkType")
-ReplayBufferState = Any
 ActivationFn = Callable[[jax.Array], jax.Array]
 Initializer = Callable[..., Any]
-State = TypeVar("State")
-Sample = TypeVar("Sample")
 
 
 def print_hyperparameters(args):

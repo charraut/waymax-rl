@@ -112,10 +112,10 @@ def run(
         )
         eval_scenario = next(data_generator_eval)
 
-    sample_simulator_state = env.reset(next(data_generator)).simulator_state
+    sample_env_state = env.reset(next(data_generator)).simulator_state
 
     # Observation & action spaces dimensions
-    obs_size = env.observation_spec(sample_simulator_state)
+    obs_size = env.observation_spec(sample_env_state)
     action_size = env.action_spec().data.shape[0]
     action_shape = (args.num_envs, action_size)
 
@@ -137,7 +137,7 @@ def run(
     )
 
     def prefill_replay_buffer(
-        batch_simulator_state,
+        batch_scenarios,
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
     ):
@@ -165,14 +165,14 @@ def run(
         buffer_state, _ = jax.lax.scan(
             run_episode,
             (buffer_state, key),
-            batch_simulator_state,
+            batch_scenarios,
             length=args.num_episode_per_epoch,
         )[0]
 
         return buffer_state
 
     def run_epoch(
-        batch_simulator_state,
+        batch_scenarios,
         training_state: TrainingState,
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
@@ -228,13 +228,13 @@ def run(
         (training_state, buffer_state, _), metrics = jax.lax.scan(
             run_episode,
             (training_state, buffer_state, key),
-            batch_simulator_state,
+            batch_scenarios,
             length=args.num_episode_per_epoch,
         )
 
         return training_state, buffer_state, metrics
 
-    def run_evaluation(batch_simulator_state, training_state: TrainingState):
+    def run_evaluation(batch_scenarios, training_state: TrainingState):
         policy = make_policy(training_state.actor_params, deterministic=True)
 
         def run_step(env_state):
@@ -265,7 +265,7 @@ def run(
         _, metrics = jax.lax.scan(
             run_episode,
             (),
-            batch_simulator_state,
+            batch_scenarios,
             length=args.num_scenario_per_eval,
         )
 
@@ -301,7 +301,7 @@ def run(
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
     print(f"buffer shape: {buffer_state.data.shape}")
-    print(f"batch scenarios shape: {sample_simulator_state.shape}")
+    print(f"batch scenarios shape: {sample_env_state.shape}")
     print(f"-> Pre-training: {perf_counter() - start_train_func:.2f}s")
     print("training".center(50, "="))
 
@@ -318,12 +318,12 @@ def run(
         epoch_keys = jax.random.split(epoch_key, num_devices)
 
         t = perf_counter()
-        batch_simulator_state = next(data_generator)
+        batch_scenarios = next(data_generator)
         epoch_data_time = perf_counter() - t
 
         t = perf_counter()
         training_state, buffer_state, training_metrics = run_epoch(
-            batch_simulator_state,
+            batch_scenarios,
             training_state,
             buffer_state,
             epoch_keys,
