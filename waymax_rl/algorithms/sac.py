@@ -414,7 +414,7 @@ def train(
     # Create and initialize the replay buffer
     buffer_state = jax.pmap(replay_buffer.init)(jax.random.split(rb_key, num_devices))
 
-    while buffer_state.sample_position < args.learning_start:
+    while jnp.all(buffer_state.sample_position < args.learning_start):
         rng, prefill_key = jax.random.split(rng)
         prefill_keys = jax.random.split(prefill_key, num_devices)
 
