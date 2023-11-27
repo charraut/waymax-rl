@@ -9,7 +9,7 @@ from waymax.datatypes import Action, SimulatorState
 from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
 
-from waymax_rl.utils import Transition
+from waymax_rl.datatypes import Transition
 
 
 @chex.dataclass

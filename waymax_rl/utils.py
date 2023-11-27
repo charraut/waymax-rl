@@ -3,17 +3,11 @@ import json
 import pickle
 from argparse import ArgumentParser
 from collections.abc import Callable, Mapping
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, TypeVar
 
-import flax
 import jax
 import jax.numpy as jnp
-import optax
 from etils import epath
-from waymax.config import DataFormat, DatasetConfig
-from waymax.dataloader import simulator_state_generator
-
-from waymax_rl.constants import WOD_1_0_0_TRAINING_BUCKET
 
 
 Params = Any
@@ -27,94 +21,14 @@ State = TypeVar("State")
 Sample = TypeVar("Sample")
 
 
-class Transition(NamedTuple):
-    """Container for a transition."""
-
-    observation: jax.Array
-    action: jax.Array
-    reward: jax.Array
-    flag: jax.Array
-    next_observation: jax.Array
-    done: jax.Array
-
-
-@flax.struct.dataclass
-class TrainingState:
-    """Contains training state for the learner."""
-
-    actor_optimizer_state: optax.OptState
-    actor_params: Params
-    critic_optimizer_state: optax.OptState
-    critic_params: Params
-    target_critic_params: Params
-    gradient_steps: jax.Array
-    env_steps: jax.Array
-
-
-def init_training_state(
-    key: PRNGKey,
-    num_devices: int,
-    neural_network,
-    actor_optimizer: optax.GradientTransformation,
-    critic_optimizer: optax.GradientTransformation,
-) -> TrainingState:
-    """Inits the training state and replicates it over devices."""
-    key_actor, key_critic = jax.random.split(key)
-
-    actor_params = neural_network.actor_network.init(key_actor)
-    actor_optimizer_state = actor_optimizer.init(actor_params)
-    critic_params = neural_network.critic_network.init(key_critic)
-    critic_optimizer_state = critic_optimizer.init(critic_params)
-
-    training_state = TrainingState(
-        actor_optimizer_state=actor_optimizer_state,
-        actor_params=actor_params,
-        critic_optimizer_state=critic_optimizer_state,
-        critic_params=critic_params,
-        target_critic_params=critic_params,
-        gradient_steps=jnp.zeros(()),
-        env_steps=jnp.zeros(()),
-    )
-
-    return jax.device_put_replicated(training_state, jax.local_devices()[:num_devices])
-
-
-def make_simulator_state_generator(
-    max_num_objects: int,
-    seed: int = 0,
-    batch_dims: tuple = (),
-    distributed: bool = True,
-    path: str = WOD_1_0_0_TRAINING_BUCKET,
-):
-    return simulator_state_generator(
-        DatasetConfig(
-            path=path,
-            max_num_rg_points=20000,
-            data_format=DataFormat.TFRECORD,
-            max_num_objects=max_num_objects,
-            batch_dims=batch_dims,
-            distributed=distributed,
-            shuffle_seed=seed,
-        ),
-    )
-
-
-def make_simulator_state_generator_eval(
-    max_num_objects: int,
-    seed: int = 0,
-    batch_dims: tuple = (),
-    path: str = WOD_1_0_0_TRAINING_BUCKET,
-):
-    return simulator_state_generator(
-        DatasetConfig(
-            path=path,
-            max_num_rg_points=20000,
-            data_format=DataFormat.TFRECORD,
-            max_num_objects=max_num_objects,
-            batch_dims=batch_dims,
-            shuffle_seed=seed,
-        ),
-    )
+def print_hyperparameters(args):
+    print("parameters".center(50, "="))
+    for key, value in vars(args).items():
+        print(f"{key}: {value}")
+    print("device".center(50, "="))
+    print(f"jax.local_devices_to_use: {jax.local_device_count()}")
+    print(f"jax.default_backend(): {jax.default_backend()}")
+    print(f"jax.local_devices(): {jax.local_devices()}")
 
 
 def load_params(path: str) -> Any:
@@ -135,7 +49,7 @@ def synchronize_hosts():
 
     # Make sure all processes stay up until the end of main
     x = jnp.ones([jax.local_device_count()])
-    x = jax.device_get(jax.pmap(lambda x: jax.lax.psum(x, "batch"), "batch")(x))
+    x = jax.device_get(jax.pmap(lambda x: jax.lax.psum(x, "i"), "i")(x))
 
     assert x[0] == jax.device_count()
 
@@ -170,9 +84,9 @@ def assert_is_replicated(x: Any, debug: Any = None):
       x: Object to check replication.
       debug: Debug message in case of failure.
     """
-    f = functools.partial(is_replicated, axis_name="batch")
+    f = functools.partial(is_replicated, axis_name="i")
 
-    assert jax.pmap(f, axis_name="batch")(x)[0], debug
+    assert jax.pmap(f, axis_name="i")(x)[0], debug
 
 
 def unpmap(v):

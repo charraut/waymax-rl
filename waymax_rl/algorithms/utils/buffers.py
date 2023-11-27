@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from jax import flatten_util
 
-from waymax_rl.utils import PRNGKey, Transition
+from waymax_rl.datatypes import Transition
 
 
 @flax.struct.dataclass
@@ -13,7 +13,7 @@ class ReplayBufferState:
     data: jax.Array
     insert_position: int
     sample_position: int
-    key: PRNGKey
+    key: jax.random.PRNGKey
 
 
 class ReplayBuffer:
@@ -31,7 +31,7 @@ class ReplayBuffer:
         self._batch_size = batch_size
         self._size = buffer_size
 
-    def init(self, key: PRNGKey) -> ReplayBufferState:
+    def init(self, key: jax.random.PRNGKey) -> ReplayBufferState:
         return ReplayBufferState(
             data=jnp.zeros(self._data_shape, self._data_dtype),
             insert_position=0,
