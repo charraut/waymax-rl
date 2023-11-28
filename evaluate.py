@@ -7,8 +7,7 @@ from waymax.visualization import plot_simulator_state
 from waymax_rl.algorithms.sac import make_sac_networks
 from waymax_rl.algorithms.utils.networks import make_inference_fn
 from waymax_rl.constants import WOD_1_1_0_VALIDATION_BUCKET
-from waymax_rl.pipeline import make_simulator_state_generator
-from waymax_rl.policy import policy_step
+from waymax_rl.pipeline import make_simulator_state_generator, policy_step
 from waymax_rl.simulator import create_bicycle_env
 from waymax_rl.utils import get_model_path, load_args, load_params, select_run_path, write_video
 

@@ -120,28 +120,16 @@ def make_losses(sac_network, gamma: float, alpha: float):
     return critic_loss, actor_loss
 
 
-def init_soft_actor_critic(args, obs_size, action_size):
-    # Builds the SAC networks
-    sac_network = make_sac_networks(
-        observation_size=obs_size,
-        action_size=action_size,
-        learning_rate=args.learning_rate,
-        actor_layers=args.actor_layers,
-        critic_layers=args.critic_layers,
-    )
-
-    # Builds the FWD function of the SAC Policy
-    make_policy = make_inference_fn(sac_network)
-
+def make_sgd_step(sac_network, learning_rate: float, tau: float, gamma: float, alpha: float):
     # Optimizers
-    actor_optimizer = optax.adam(learning_rate=args.learning_rate)
-    critic_optimizer = optax.adam(learning_rate=args.learning_rate)
+    actor_optimizer = optax.adam(learning_rate=learning_rate)
+    critic_optimizer = optax.adam(learning_rate=learning_rate)
 
     # Create losses and grad functions for SAC losses
     critic_loss, actor_loss = make_losses(
         sac_network=sac_network,
-        gamma=args.gamma,
-        alpha=args.alpha,
+        gamma=gamma,
+        alpha=alpha,
     )
 
     actor_update = gradient_update_fn(
@@ -180,7 +168,7 @@ def init_soft_actor_critic(args, obs_size, action_size):
         )
 
         new_target_critic_params = jax.tree_util.tree_map(
-            lambda x, y: x * (1 - args.tau) + y * args.tau,
+            lambda x, y: x * (1 - tau) + y * tau,
             training_state.target_critic_params,
             critic_params,
         )
@@ -202,4 +190,18 @@ def init_soft_actor_critic(args, obs_size, action_size):
 
         return (new_training_state, key), metrics
 
-    return sac_network, make_policy, sgd_step
+    return sgd_step
+
+
+def init_sac_policy(args, obs_size, action_size):
+    network = make_sac_networks(
+        observation_size=obs_size,
+        action_size=action_size,
+        learning_rate=args.learning_rate,
+        actor_layers=args.actor_layers,
+        critic_layers=args.critic_layers,
+    )
+    policy_fn = make_inference_fn(network)
+    learn_fn = make_sgd_step(network, args.learning_rate, args.tau, args.gamma, args.alpha)
+
+    return network, policy_fn, learn_fn

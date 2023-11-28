@@ -4,9 +4,7 @@ import flax
 import jax
 import optax
 
-from waymax_rl.utils import (
-    Params,
-)
+from waymax_rl.utils import Params
 
 
 class Transition(NamedTuple):

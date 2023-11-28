@@ -6,11 +6,10 @@ import jax.numpy as jnp
 from waymax.config import DataFormat, DatasetConfig
 from waymax.dataloader import simulator_state_generator
 
-from waymax_rl.algorithms.sac import init_soft_actor_critic
+from waymax_rl.algorithms.sac import init_sac_policy
 from waymax_rl.algorithms.utils.buffers import ReplayBuffer, ReplayBufferState
 from waymax_rl.datatypes import TrainingState, Transition
-from waymax_rl.policy import policy_step, random_step
-from waymax_rl.simulator.env import WaymaxBaseEnv
+from waymax_rl.simulator.env import EnvState, WaymaxBaseEnv
 from waymax_rl.utils import Metrics, assert_is_replicated, print_hyperparameters, save_params, synchronize_hosts, unpmap
 
 
@@ -60,6 +59,39 @@ def make_simulator_state_generator(
     )
 
 
+def policy_step(
+    env_state: EnvState,
+    env: WaymaxBaseEnv,
+    policy: callable,
+    key: jax.random.PRNGKey = None,
+) -> tuple:
+    # Obtain the current observation from the environment
+    observation = env.observe(env_state.simulator_state)
+
+    # Determine actions based on the given policy and observation
+    actions = policy(observation, key)
+
+    # Apply the actions to the environment and get the resulting slice of the episode
+    env_state, transition = env.step(env_state, actions)
+
+    return env_state, transition
+
+
+def random_step(
+    env_state: EnvState,
+    env: WaymaxBaseEnv,
+    action_shape: tuple,
+    key: jax.random.PRNGKey,
+    action_bounds: tuple[float, float] = (-1.0, 1.0),
+) -> tuple:
+    # Generating actions within the specified bounds
+    actions = jax.random.uniform(key=key, shape=action_shape, minval=action_bounds[0], maxval=action_bounds[1])
+
+    env_state, transition = env.step(env_state, actions)
+
+    return env_state, transition
+
+
 def run(
     args,
     environment: WaymaxBaseEnv,
@@ -100,7 +132,7 @@ def run(
     action_shape = (args.num_envs, action_size)
 
     # SAC
-    sac_network, make_policy, sgd_step = init_soft_actor_critic(args, obs_size, action_size)
+    neural_network, make_policy, learning_step = init_sac_policy(args, obs_size, action_size)
 
     # Create Replay Buffer
     replay_buffer = ReplayBuffer(
@@ -125,7 +157,7 @@ def run(
             env_state, buffer_state, key = carry
             key, step_key = jax.random.split(key)
 
-            env_state, transition = random_step(env, env_state, action_shape, step_key)
+            env_state, transition = random_step(env_state, env, action_shape, step_key)
             buffer_state = replay_buffer.insert(buffer_state, transition, env_state.mask)
 
             return env_state, buffer_state, key
@@ -151,7 +183,7 @@ def run(
 
         return buffer_state
 
-    def run_epoch(
+    def run_training(
         batch_scenarios,
         training_state: TrainingState,
         buffer_state: ReplayBufferState,
@@ -172,7 +204,7 @@ def run(
                 lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
                 transitions,
             )
-            (training_state, _), sgd_metrics = jax.lax.scan(sgd_step, (training_state, training_key), transitions)
+            (training_state, _), sgd_metrics = jax.lax.scan(learning_step, (training_state, training_key), transitions)
 
             return training_state, env_state, buffer_state, key
 
@@ -251,7 +283,7 @@ def run(
 
         return metrics
 
-    run_epoch = jax.pmap(run_epoch, axis_name="i")
+    run_training = jax.pmap(run_training, axis_name="i")
     run_evaluation = jax.pmap(run_evaluation, axis_name="i")
     prefill_replay_buffer = jax.pmap(prefill_replay_buffer, axis_name="i")
 
@@ -260,7 +292,7 @@ def run(
     training_state = init_training_state(
         key=training_key,
         num_devices=num_devices,
-        neural_network=sac_network,
+        neural_network=neural_network,
     )
 
     # Create and initialize the replay buffer
@@ -301,7 +333,7 @@ def run(
         epoch_data_time = perf_counter() - t
 
         t = perf_counter()
-        training_state, buffer_state, training_metrics = run_epoch(
+        training_state, buffer_state, training_metrics = run_training(
             batch_scenarios,
             training_state,
             buffer_state,

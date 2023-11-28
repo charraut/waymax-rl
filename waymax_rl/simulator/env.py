@@ -60,11 +60,11 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             metrics=metrics,
         )
 
-    # def termination(self, simulator_state: SimulatorState) -> jax.Array:
-    #     """Returns a boolean array denoting the end of an episode."""
-    #     metrics = super().metrics(simulator_state)
+    def termination(self, simulator_state: SimulatorState) -> jax.Array:
+        """Returns a boolean array denoting the end of an episode."""
+        metrics = super().metrics(simulator_state)
 
-    #     return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
+        return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
 
     def metrics(self, simulator_state: SimulatorState) -> dict[str, jax.Array]:
         """Returns a dictionary of metrics."""
