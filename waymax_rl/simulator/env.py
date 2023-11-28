@@ -38,8 +38,8 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         if reward_fn is not None:
             self.reward = reward_fn
 
-    def observation_spec(self, simulator_state: SimulatorState):
-        observation = self.observe(simulator_state)
+    def observation_spec(self, env_state: EnvState):
+        observation = self.observe(env_state.simulator_state)
 
         return observation.shape[-1]
 
@@ -60,11 +60,11 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             metrics=metrics,
         )
 
-    def termination(self, simulator_state: SimulatorState) -> jax.Array:
-        """Returns a boolean array denoting the end of an episode."""
-        metrics = super().metrics(simulator_state)
+    # def termination(self, simulator_state: SimulatorState) -> jax.Array:
+    #     """Returns a boolean array denoting the end of an episode."""
+    #     metrics = super().metrics(simulator_state)
 
-        return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
+    #     return jnp.logical_or(metrics["offroad"].value, metrics["overlap"].value)
 
     def metrics(self, simulator_state: SimulatorState) -> dict[str, jax.Array]:
         """Returns a dictionary of metrics."""
@@ -91,7 +91,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             max_num_objects=max_num_objects,
             rewards=LinearCombinationRewardConfig(
                 rewards={
-                    "log_divergence": -0.05,
+                    "log_divergence": -1.0,
                 },
             ),
         )
@@ -121,6 +121,9 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         termination = self.termination(next_simulator_state)
         truncation = self.truncation(next_simulator_state)
         metrics = self.metrics(next_simulator_state)
+
+        is_within_range = jnp.logical_and(reward >= -0.3, reward <= 0)
+        reward = jnp.where(is_within_range, 1.0, 0.0)
 
         done = jnp.logical_or(termination, truncation)
         flag = jnp.logical_not(termination)

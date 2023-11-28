@@ -60,24 +60,6 @@ def make_simulator_state_generator(
     )
 
 
-def make_simulator_state_generator_eval(
-    path: str,
-    max_num_objects: int,
-    seed: int = 0,
-    batch_dims: tuple = (),
-):
-    return simulator_state_generator(
-        DatasetConfig(
-            path=path,
-            max_num_rg_points=20000,
-            data_format=DataFormat.TFRECORD,
-            max_num_objects=max_num_objects,
-            batch_dims=batch_dims,
-            shuffle_seed=seed,
-        ),
-    )
-
-
 def run(
     args,
     environment: WaymaxBaseEnv,
@@ -112,10 +94,8 @@ def run(
         )
         eval_scenario = next(data_generator_eval)
 
-    sample_env_state = env.reset(next(data_generator)).simulator_state
-
     # Observation & action spaces dimensions
-    obs_size = env.observation_spec(sample_env_state)
+    obs_size = env.observation_spec(env.reset(next(data_generator)))
     action_size = env.action_spec().data.shape[0]
     action_shape = (args.num_envs, action_size)
 
@@ -183,7 +163,7 @@ def run(
 
             # Rollout step
             policy = make_policy(training_state.actor_params)
-            env_state, transition = policy_step(env, env_state, policy, step_key)
+            env_state, transition = policy_step(env_state, env, policy, step_key)
             buffer_state = replay_buffer.insert(buffer_state, transition, env_state.mask)
 
             # Learning step
@@ -238,7 +218,7 @@ def run(
         policy = make_policy(training_state.actor_params, deterministic=True)
 
         def run_step(env_state):
-            env_state, _ = policy_step(env, env_state, policy, None)
+            env_state, _ = policy_step(env_state, env, policy, None)
 
             return env_state
 
@@ -301,7 +281,6 @@ def run(
     print(f"observation size: {obs_size}")
     print(f"action size: {action_size}")
     print(f"buffer shape: {buffer_state.data.shape}")
-    print(f"batch scenarios shape: {sample_env_state.shape}")
     print(f"-> Pre-training: {perf_counter() - start_train_func:.2f}s")
     print("training".center(50, "="))
 

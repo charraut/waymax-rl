@@ -8,8 +8,8 @@ if TYPE_CHECKING:
 
 
 def policy_step(
-    env: "WaymaxBaseEnv",
     env_state: "EnvState",
+    env: "WaymaxBaseEnv",
     policy: callable,
     key: jax.random.PRNGKey = None,
 ) -> tuple:
