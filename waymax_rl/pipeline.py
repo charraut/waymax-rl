@@ -42,7 +42,7 @@ def init_training_state(
 def make_simulator_state_generator(
     path: str,
     max_num_objects: int,
-    seed: int = 0,
+    seed: int = None,
     batch_dims: tuple = (),
     distributed: bool = True,
 ):
