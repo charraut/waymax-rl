@@ -153,6 +153,7 @@ def run(
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
     ):
+        # TODO: Remove while loop and use scan instead for parallelism
         def run_random_step(carry):
             env_state, buffer_state, key = carry
             key, step_key = jax.random.split(key)
@@ -189,6 +190,7 @@ def run(
         buffer_state: ReplayBufferState,
         key: jax.random.PRNGKey,
     ):
+        # TODO: Remove while loop and use scan instead for parallelism
         def run_step(carry):
             training_state, env_state, buffer_state, key = carry
             key, step_key, training_key = jax.random.split(key, 3)

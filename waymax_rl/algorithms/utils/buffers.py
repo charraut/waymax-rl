@@ -56,6 +56,7 @@ class ReplayBuffer:
                 f"doesn't match the expected value ({self._data_shape})",
             )
 
+        # TODO: This is a temporary solution to the problem of inserting
         # # Flatten the samples
         # _samples = self._flatten_fn(samples)
 

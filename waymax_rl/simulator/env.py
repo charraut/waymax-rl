@@ -4,7 +4,7 @@ import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
-from waymax.config import EnvironmentConfig, LinearCombinationRewardConfig
+from waymax.config import EnvironmentConfig
 from waymax.datatypes import Action, SimulatorState
 from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
 from waymax.env.planning_agent_environment import PlanningAgentEnvironment
