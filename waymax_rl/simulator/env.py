@@ -87,14 +87,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         """Initializes the Waymax bibycle environment."""
 
         dynamics_model = InvertibleBicycleModel(normalize_actions=normalize_actions)
-        env_config = EnvironmentConfig(
-            max_num_objects=max_num_objects,
-            rewards=LinearCombinationRewardConfig(
-                rewards={
-                    "log_divergence": -1.0,
-                },
-            ),
-        )
+        env_config = EnvironmentConfig(max_num_objects=max_num_objects)
 
         super().__init__(
             dynamics_model,
@@ -121,9 +114,6 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         termination = self.termination(next_simulator_state)
         truncation = self.truncation(next_simulator_state)
         metrics = self.metrics(next_simulator_state)
-
-        is_within_range = jnp.logical_and(reward >= -0.3, reward <= 0)
-        reward = jnp.where(is_within_range, 1.0, 0.0)
 
         done = jnp.logical_or(termination, truncation)
         flag = jnp.logical_not(termination)
