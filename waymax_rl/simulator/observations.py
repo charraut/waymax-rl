@@ -13,7 +13,7 @@ def normalize_by_meters(data: jax.Array, meters: int = 20) -> jax.Array:
 
 def obs_vectorize(state: SimulatorState, trajectory_length: int = 1, normalize: bool = True) -> jax.Array:
     batch_dims = state.batch_dims
-    observation = sdc_observation_from_state(state, obs_num_steps=trajectory_length, roadgraph_top_k=500)
+    observation = sdc_observation_from_state(state, obs_num_steps=trajectory_length, roadgraph_top_k=100)
 
     # Extract all the data from the observation
     trajectory = observation.trajectory.xy

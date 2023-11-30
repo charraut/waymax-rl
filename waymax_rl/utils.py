@@ -12,6 +12,9 @@ import jax.numpy as jnp
 import mediapy
 from etils import epath
 
+from tensorboardX import SummaryWriter
+from datetime import datetime
+
 
 Params = Any
 Metrics = Mapping[str, jax.Array]
@@ -165,3 +168,30 @@ def select_run_path(run_path):
         path = None
 
     return path
+
+
+def print_metrics(num_steps, metrics, writer=None):
+    """
+    Print metrics and optionally write to tensorboard.
+    """
+    for key, value in metrics.items():
+        if writer:
+            writer.add_scalar(key, value, num_steps)
+        print(f"{key}: {value}")
+    print()
+
+
+def setup_run(exp_name, args):
+    """
+    Setup for running the experiment.
+    """
+    run_time = datetime.now().strftime("%d-%m_%H:%M:%S")
+    path_to_save_model = f"runs/{exp_name}_{run_time}"
+    writer = SummaryWriter(path_to_save_model)
+
+    # Save hyperparameters and args
+    hyperparameters_text = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    writer.add_text("hyperparameters", "|param|value|\n|-|-|\n" + hyperparameters_text)
+    save_args(args, path_to_save_model)
+
+    return writer, path_to_save_model

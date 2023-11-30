@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from waymax.config import DataFormat, DatasetConfig
 from waymax.dataloader import simulator_state_generator
 
-from waymax_rl.algorithms.sac import init_sac_policy
+from waymax_rl.algorithms.online_rl.sac import init_sac_policy
 from waymax_rl.algorithms.utils.buffers import ReplayBuffer, ReplayBufferState
 from waymax_rl.datatypes import TrainingState, Transition
 from waymax_rl.simulator.env import EnvState, WaymaxBaseEnv
@@ -206,7 +206,7 @@ def run(
                 lambda x: jnp.reshape(x, (args.grad_updates_per_step, -1) + x.shape[1:]),
                 transitions,
             )
-            (training_state, _), sgd_metrics = jax.lax.scan(learning_step, (training_state, training_key), transitions)
+            (training_state, _) = jax.lax.scan(learning_step, (training_state, training_key), transitions)
 
             return training_state, env_state, buffer_state, key
 

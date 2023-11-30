@@ -6,7 +6,6 @@ import optax
 
 from waymax_rl.utils import Params
 
-
 class Transition(NamedTuple):
     """Container for a transition."""
 
@@ -27,5 +26,14 @@ class TrainingState:
     target_critic_params: Params
     actor_optimizer_state: optax.OptState
     critic_optimizer_state: optax.OptState
+    gradient_steps: jax.Array
+    env_steps: jax.Array
+
+@flax.struct.dataclass
+class BCTrainingState:
+    """Contains training state for the learner."""
+
+    actor_params: Params
+    actor_optimizer_state: optax.OptState
     gradient_steps: jax.Array
     env_steps: jax.Array

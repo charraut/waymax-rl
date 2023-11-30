@@ -1,17 +1,13 @@
 import argparse
 import os
 from collections.abc import Sequence
-from datetime import datetime
 from functools import partial
 
 import jax
-from tensorboardX import SummaryWriter
-
 from waymax_rl.constants import WOD_1_1_0_TRAINING_BUCKET, WOD_1_1_0_VALIDATION_BUCKET
 from waymax_rl.pipeline import run
 from waymax_rl.simulator import create_bicycle_env
-from waymax_rl.utils import save_args
-
+from waymax_rl.utils import setup_run, print_metrics
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -83,35 +79,6 @@ def setup_debugging(args):
 
     return args
 
-
-def print_metrics(num_steps, metrics, writer=None):
-    """
-    Print metrics and optionally write to tensorboard.
-    """
-    for key, value in metrics.items():
-        if writer:
-            writer.add_scalar(key, value, num_steps)
-        print(f"{key}: {value}")
-    print()
-
-
-def setup_run(args):
-    """
-    Setup for running the experiment.
-    """
-    exp_name = "SAC"
-    run_time = datetime.now().strftime("%d-%m_%H:%M:%S")
-    path_to_save_model = f"runs/{exp_name}_{run_time}"
-    writer = SummaryWriter(path_to_save_model)
-
-    # Save hyperparameters and args
-    hyperparameters_text = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
-    writer.add_text("hyperparameters", "|param|value|\n|-|-|\n" + hyperparameters_text)
-    save_args(args, path_to_save_model)
-
-    return writer, path_to_save_model
-
-
 if __name__ == "__main__":
     _args = parse_args()
 
@@ -120,7 +87,7 @@ if __name__ == "__main__":
         path_to_save_model = None
         progress = print_metrics
     else:
-        writer, path_to_save_model = setup_run(_args)
+        writer, path_to_save_model = setup_run("SAC", _args)
         progress = partial(print_metrics, writer=writer)
 
     env = create_bicycle_env(
