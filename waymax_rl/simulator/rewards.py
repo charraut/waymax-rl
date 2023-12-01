@@ -5,8 +5,9 @@ from waymax.metrics.imitation import LogDivergenceMetric
 from waymax.metrics.overlap import OverlapMetric
 from waymax.metrics.roadgraph import OffroadMetric
 
+
 def reward_overlap_offroad(state: SimulatorState, action: Action) -> jnp.ndarray:
-    """Reward function for the vectorize task."""
+    """Reward function for the overlap and offroad task."""
 
     _, sdc_idx = jax.lax.top_k(state.object_metadata.is_sdc, k=1)
     scenario_overlap = OverlapMetric().compute(state).value
@@ -20,6 +21,7 @@ def reward_overlap_offroad(state: SimulatorState, action: Action) -> jnp.ndarray
     reward = sdc_overlap * factor + sdc_offroad * factor
 
     return reward
+
 
 def reward_target(state: SimulatorState, action: Action) -> jnp.ndarray:
     """Reward function for the target task."""

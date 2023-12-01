@@ -17,14 +17,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--grad_updates_per_step", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_episode_per_epoch", type=int, default=32)
     parser.add_argument("--max_num_objects", type=int, default=16)
-    parser.add_argument("--trajectory_length", type=int, default=3)
-    parser.add_argument("--save_freq", type=int, default=0)
+    parser.add_argument("--trajectory_length", type=int, default=2)
+    parser.add_argument("--save_freq", type=int, default=100)
     parser.add_argument("--eval_freq", type=int, default=0)
     parser.add_argument("--num_scenario_per_eval", type=int, default=16)
     # SAC
@@ -33,10 +33,10 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     # Network
-    parser.add_argument("--actor_layers", type=Sequence[int], default=(1024, 512, 256, 256))
-    parser.add_argument("--critic_layers", type=Sequence[int], default=(1024, 512, 256, 256))
+    parser.add_argument("--actor_layers", type=Sequence[int], default=(256, 256, 256, 256))
+    parser.add_argument("--critic_layers", type=Sequence[int], default=(256, 256, 256, 256))
     # Replay Buffer
-    parser.add_argument("--buffer_size", type=int, default=327_680)
+    parser.add_argument("--buffer_size", type=int, default=300_000)
     parser.add_argument("--learning_start", type=int, default=8192)
     # Misc
     parser.add_argument("--path_dataset", type=str, default=None)

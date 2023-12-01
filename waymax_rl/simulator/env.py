@@ -4,6 +4,7 @@ import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
+from waymax import datatypes
 from waymax.config import EnvironmentConfig
 from waymax.datatypes import Action, SimulatorState
 from waymax.dynamics import DynamicsModel, InvertibleBicycleModel
@@ -50,6 +51,9 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
         mask = jnp.ones(simulator_state.batch_dims[-1], dtype=jnp.bool_)
         timesteps = jnp.full(simulator_state.batch_dims[-1], simulator_state.timestep)
         episode_reward = jnp.zeros(simulator_state.batch_dims[-1])
+        # mask = 1
+        # timesteps = simulator_state.timestep
+        # episode_reward = 0
         metrics = {key: 0 for key in self.metrics(simulator_state)}
 
         return EnvState(
@@ -59,6 +63,9 @@ class WaymaxBaseEnv(PlanningAgentEnvironment):
             episode_reward=episode_reward,
             metrics=metrics,
         )
+
+    def reward(self, state: SimulatorState) -> jax.Array:
+        return super().reward(state, None)
 
     def termination(self, simulator_state: SimulatorState) -> jax.Array:
         """Returns a boolean array denoting the end of an episode."""
@@ -110,7 +117,7 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
         next_obs = self.observe(next_simulator_state)
 
         # Calculate the reward and check for termination and truncation conditions
-        reward = self.reward(next_simulator_state, waymax_action)
+        reward = self.reward(next_simulator_state)
         termination = self.termination(next_simulator_state)
         truncation = self.truncation(next_simulator_state)
         metrics = self.metrics(next_simulator_state)
@@ -129,6 +136,17 @@ class WaymaxBicycleEnv(WaymaxBaseEnv):
             episode_reward=episode_reward,
             metrics=metrics,
         )
+
+        # print("----------------------------------------")
+        # print(f"action: {action}")
+        # print(f"waymax_action: {waymax_action}")
+        # print(f"reward: {reward}")
+        # print(f"termination: {termination}")
+        # print(f"truncation: {truncation}")
+        # print(f"metrics: {metrics}")
+        # print(f"done: {done}")
+        # print(f"flag: {flag}")
+        # print()
 
         return next_env_state, Transition(
             observation=self.observe(current_simulator_state),

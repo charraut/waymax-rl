@@ -122,9 +122,12 @@ def get_model_path(model_path, model_name: str = ""):
         pkl_files = [f for f in os.listdir(model_path) if f.endswith(".pkl")]
 
         if pkl_files:
-            # model_name is the last file with .pkl extension
-            model_name = pkl_files[-1]
-            print("Model name: ", model_name)
+            if "model_final.pkl" in pkl_files:
+                model_name = "model_final.pkl"
+                print("Model name: ", model_name)
+            else:
+                model_name = pkl_files[-1]
+                print("Model name: ", model_name)
         else:
             print("No .pkl files found in the directory")
             return None

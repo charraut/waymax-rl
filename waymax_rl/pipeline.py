@@ -74,7 +74,7 @@ def policy_step(
     # Apply the actions to the environment and get the resulting slice of the episode
     env_state, transition = env.step(env_state, actions)
 
-    return env_state, transition
+    return env_state, transition, actions
 
 
 def random_step(
